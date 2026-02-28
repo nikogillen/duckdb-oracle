@@ -55,7 +55,7 @@ ORDER BY i.index_name, ic.column_position
 		auto idx_entry = make_shared_ptr<OracleIndexEntry>(
 		    static_cast<Catalog &>(catalog), static_cast<SchemaCatalogEntry &>(schema),
 		    *entry.second);
-		CreateEntry(transaction, std::move(idx_entry));
+		CreateEntryInternal(std::move(idx_entry));
 	}
 }
 

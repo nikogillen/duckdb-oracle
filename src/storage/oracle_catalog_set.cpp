@@ -42,13 +42,17 @@ void OracleCatalogSet::Scan(ClientContext &context, OracleTransaction &transacti
 	}
 }
 
-optional_ptr<CatalogEntry> OracleCatalogSet::CreateEntry(OracleTransaction &transaction,
-                                                           shared_ptr<CatalogEntry> entry) {
-	lock_guard<mutex> l(entry_lock);
+optional_ptr<CatalogEntry> OracleCatalogSet::CreateEntryInternal(shared_ptr<CatalogEntry> entry) {
 	auto &name = entry->name;
 	auto result = entry.get();
 	entries[name] = std::move(entry);
 	return result;
+}
+
+optional_ptr<CatalogEntry> OracleCatalogSet::CreateEntry(OracleTransaction &transaction,
+                                                           shared_ptr<CatalogEntry> entry) {
+	lock_guard<mutex> l(entry_lock);
+	return CreateEntryInternal(std::move(entry));
 }
 
 void OracleCatalogSet::DropEntry(OracleTransaction &transaction, DropInfo &info) {

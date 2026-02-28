@@ -43,6 +43,9 @@ public:
 	void ClearEntries();
 
 protected:
+	// Called from within LoadEntries/ReloadEntry while entry_lock is already held.
+	optional_ptr<CatalogEntry> CreateEntryInternal(shared_ptr<CatalogEntry> entry);
+
 	virtual void LoadEntries(ClientContext &context, OracleTransaction &transaction) = 0;
 	virtual bool SupportReload() const {
 		return false;

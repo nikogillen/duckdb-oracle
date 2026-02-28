@@ -171,7 +171,7 @@ void OracleTableSet::CreateEntries(OracleTransaction &transaction,
 		auto table_entry = make_shared_ptr<OracleTableEntry>(
 		    static_cast<Catalog &>(catalog), static_cast<SchemaCatalogEntry &>(schema),
 		    *tbl_info);
-		CreateEntry(transaction, std::move(table_entry));
+		CreateEntryInternal(std::move(table_entry));
 	}
 }
 
@@ -280,7 +280,7 @@ optional_ptr<CatalogEntry> OracleTableSet::ReloadEntry(OracleTransaction &transa
 	auto table_entry = make_shared_ptr<OracleTableEntry>(
 	    static_cast<Catalog &>(catalog), static_cast<SchemaCatalogEntry &>(schema),
 	    *table_info);
-	return CreateEntry(transaction, std::move(table_entry));
+	return CreateEntryInternal(std::move(table_entry));
 }
 
 // ---------------------------------------------------------------------------
