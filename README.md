@@ -14,3 +14,8 @@
 
 Failed to load 'oracle_scanner.duckdb_extension', The file was built specifically for DuckDB version '83ae79e5b7' and can only be loaded with that version of DuckDB. (this version of DuckDB is 'v1.4.4')
 
+OK logon works but select on any table gives 
+Invalid Error:
+resource deadlock would occur: resource deadlock would occur
+
+But incorrect login gives  ORA-01017: invalid username/password; logon denied
