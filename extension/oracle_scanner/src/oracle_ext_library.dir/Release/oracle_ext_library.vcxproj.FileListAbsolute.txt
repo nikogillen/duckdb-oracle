@@ -1,0 +1,1 @@
+C:\wrk\duckdb-oracle-build\extension\oracle_scanner\src\oracle_ext_library.dir\Release\oracle_ext_library.lib

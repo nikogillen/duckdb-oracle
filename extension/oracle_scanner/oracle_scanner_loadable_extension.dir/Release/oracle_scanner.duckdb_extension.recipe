@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <ProjectOutputs>
+    <ProjectOutput>
+      <FullPath>C:\wrk\duckdb-oracle-build\x64\Release\ZERO_CHECK</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\wrk\duckdb-oracle-build\Release\duckdb_platform_binary.exe</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\wrk\duckdb-oracle-build\x64\Release\duckdb_platform</FullPath>
+    </ProjectOutput>
+    <ProjectOutput>
+      <FullPath>C:\wrk\duckdb-oracle-build\extension\oracle_scanner\oracle_scanner.duckdb_extension</FullPath>
+    </ProjectOutput>
+  </ProjectOutputs>
+  <ContentFiles />
+  <SatelliteDlls />
+  <NonRecipeFileRefs />
+</Project>
