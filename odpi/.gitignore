@@ -1,0 +1,5 @@
+build
+lib
+doc/build
+test/build
+__pycache__/
