@@ -29,16 +29,24 @@ OracleTableSet::OracleTableSet(OracleSchemaEntry &schema,
 string OracleTableSet::GetColumnsQuery(const string &schema, const string &table) {
 	// Returns: owner, table_name, num_rows, column_name, data_type,
 	//          data_length, data_precision, data_scale, nullable, column_id
+	// Includes both tables and views (views get num_rows = 0).
 	string q = R"(
-SELECT t.owner, t.table_name, NVL(t.num_rows, 0) AS num_rows,
+SELECT obj.owner, obj.object_name AS table_name, NVL(tbl.num_rows, 0) AS num_rows,
        c.column_name, c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, c.column_id
-FROM all_tables t
-JOIN all_tab_columns c ON t.owner = c.owner AND t.table_name = c.table_name
+FROM (
+    SELECT owner, table_name AS object_name FROM all_tables
+    UNION ALL
+    SELECT owner, view_name  AS object_name FROM all_views
+) obj
+JOIN all_tab_columns c
+  ON obj.owner = c.owner AND obj.object_name = c.table_name
+LEFT JOIN all_tables tbl
+  ON obj.owner = tbl.owner AND obj.object_name = tbl.table_name
 )";
 	string where;
 	if (!schema.empty()) {
-		where += " WHERE t.owner = " + OracleUtils::WriteLiteral(StringUtil::Upper(schema));
+		where += " WHERE obj.owner = " + OracleUtils::WriteLiteral(StringUtil::Upper(schema));
 	}
 	if (!table.empty()) {
 		if (where.empty()) {
@@ -46,10 +54,10 @@ JOIN all_tab_columns c ON t.owner = c.owner AND t.table_name = c.table_name
 		} else {
 			where += " AND";
 		}
-		where += " t.table_name = " + OracleUtils::WriteLiteral(StringUtil::Upper(table));
+		where += " obj.object_name = " + OracleUtils::WriteLiteral(StringUtil::Upper(table));
 	}
 	q += where;
-	q += " ORDER BY t.table_name, c.column_id";
+	q += " ORDER BY obj.object_name, c.column_id";
 	return q;
 }
 

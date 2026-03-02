@@ -15,7 +15,7 @@ class OracleScannerExtension : public Extension {
 public:
 	void Load(ExtensionLoader &loader) override;
 	std::string Name() override {
-		return "oracle_scanner";
+		return "oracle";
 	}
 };
 

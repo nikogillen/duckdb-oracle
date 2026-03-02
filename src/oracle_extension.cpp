@@ -139,8 +139,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Storage extension
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
-	StorageExtension::Register(config, "oracle_scanner",
-	                            make_shared_ptr<OracleStorageExtension>());
+	config.storage_extensions["oracle"] = make_uniq<OracleStorageExtension>();
 
 	// Extension options
 	config.AddExtensionOption("ora_connection_limit",
@@ -163,11 +162,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Optimizer
 	OptimizerExtension oracle_optimizer;
 	oracle_optimizer.optimize_function = OracleOptimizer::Optimize;
-	OptimizerExtension::Register(config, std::move(oracle_optimizer));
+	config.optimizer_extensions.push_back(std::move(oracle_optimizer));
 
 	// Extension callback
-	ExtensionCallback::Register(config,
-	                             make_shared_ptr<OracleExtensionCallback>());
+	config.extension_callbacks.push_back(make_uniq<OracleExtensionCallback>());
 	for (auto &connection :
 	     ConnectionManager::Get(loader.GetDatabaseInstance()).GetConnectionList()) {
 		connection->registered_state->Insert(
@@ -185,7 +183,7 @@ void OracleScannerExtension::Load(ExtensionLoader &loader) {
 }
 
 extern "C" {
-DUCKDB_CPP_EXTENSION_ENTRY(oracle_scanner, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(oracle, loader) {
 	LoadInternal(loader);
 }
 }

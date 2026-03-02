@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.12...3.29)
-set(TARGET_NAME oracle_scanner)
+set(TARGET_NAME oracle)
 project(${TARGET_NAME})
 
 if(NOT MSVC)
