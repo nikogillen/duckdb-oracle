@@ -2,7 +2,7 @@
 
 ## v1.4.4 (2026-03-01) — DuckDB 1.4.4 LTS
 
-Initial LTS release of the `oracle_scanner` DuckDB extension, built against DuckDB **v1.4.4 LTS**.
+Initial LTS release of the `oracle` DuckDB extension, built against DuckDB **v1.4.4 LTS**.
 
 ### Features
 
@@ -25,15 +25,63 @@ Initial LTS release of the `oracle_scanner` DuckDB extension, built against Duck
 
 ### Usage
 
+#### Basic connection
+
 ```sql
 -- Load the extension
-LOAD oracle_scanner;
+LOAD oracle;
 
 -- Attach an Oracle database
 ATTACH 'user/password@host:1521/service' AS oracle_db (TYPE oracle);
 
--- Query Oracle tables
+-- Query Oracle tables and views
 SELECT * FROM oracle_db.my_table LIMIT 10;
+```
+
+#### Using secrets (recommended)
+
+Secrets keep credentials out of connection strings and query history.
+
+```sql
+-- Create a named secret
+CREATE SECRET my_oracle_secret (
+    TYPE oracle,
+    user 'scott',
+    password 'tiger',
+    connectString '//myhost:1521/MYSERVICE'
+);
+
+-- Attach using the secret
+ATTACH '' AS oracle_db (TYPE oracle, SECRET my_oracle_secret);
+```
+
+#### Default secret (auto-applied)
+
+A secret named `__default_oracle` is picked up automatically for any Oracle
+`ATTACH` that does not specify a `SECRET` option:
+
+```sql
+CREATE SECRET __default_oracle (
+    TYPE oracle,
+    user 'scott',
+    password 'tiger',
+    connectString '//myhost:1521/MYSERVICE'
+);
+
+-- No SECRET= needed
+ATTACH '' AS oracle_db (TYPE oracle);
+```
+
+#### Persistent secrets
+
+```sql
+-- Survives DuckDB restarts
+CREATE PERSISTENT SECRET my_oracle_secret (
+    TYPE oracle,
+    user 'scott',
+    password 'tiger',
+    connectString '//myhost:1521/MYSERVICE'
+);
 ```
 
 ### Dependencies
