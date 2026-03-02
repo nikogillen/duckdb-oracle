@@ -1,0 +1,249 @@
+name: MainDistributionPipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}-${{ github.base_ref || '' }}
+  cancel-in-progress: true
+
+env:
+  DUCKDB_VERSION: v1.4.4
+
+jobs:
+  linux-x86_64:
+    name: Linux x86_64
+    runs-on: ubuntu-22.04
+    container: ubuntu:22.04
+    env:
+      GEN: ninja
+      VCPKG_TARGET_TRIPLET: x64-linux
+      DUCKDB_PLATFORM: linux_amd64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install dependencies
+        run: |
+          apt-get update -y
+          apt-get install -y git curl zip unzip ninja-build cmake g++ python3
+
+      - name: Build extension
+        shell: bash
+        env:
+          DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
+        run: |
+          git clone --depth 1 --branch $DUCKDB_VERSION https://github.com/duckdb/duckdb.git duckdb
+          cd duckdb
+          git clone --depth 1 https://github.com/duckdb/extension-ci-tools.git extension-ci-tools
+          EXTENSION_CONFIGS="${{ github.workspace }}/extension_config.cmake" make bundle-release
+          cd ..
+          cp duckdb/build/release/extension/oracle_scanner/oracle_scanner.duckdb_extension oracle_scanner_linux_amd64.duckdb_extension
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle_scanner_linux_amd64
+          path: oracle_scanner_linux_amd64.duckdb_extension
+
+  linux-aarch64:
+    name: Linux AArch64
+    runs-on: ubuntu-22.04
+    env:
+      GEN: ninja
+      DUCKDB_PLATFORM: linux_arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install cross-compilation dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git curl zip unzip ninja-build cmake g++-aarch64-linux-gnu python3
+
+      - name: Build extension (cross-compile)
+        shell: bash
+        env:
+          DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
+        run: |
+          git clone --depth 1 --branch $DUCKDB_VERSION https://github.com/duckdb/duckdb.git duckdb
+          cd duckdb
+          git clone --depth 1 https://github.com/duckdb/extension-ci-tools.git extension-ci-tools
+          EXTENSION_CONFIGS="${{ github.workspace }}/extension_config.cmake" \
+            DUCKDB_PLATFORM=linux_arm64 \
+            CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ \
+            make bundle-release
+          cd ..
+          cp duckdb/build/release/extension/oracle_scanner/oracle_scanner.duckdb_extension oracle_scanner_linux_arm64.duckdb_extension
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle_scanner_linux_arm64
+          path: oracle_scanner_linux_arm64.duckdb_extension
+
+  macos-x86_64:
+    name: macOS x86_64
+    runs-on: macos-13
+    env:
+      GEN: ninja
+      DUCKDB_PLATFORM: osx_amd64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install dependencies
+        run: |
+          brew install ninja cmake
+
+      - name: Build extension
+        shell: bash
+        env:
+          DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
+        run: |
+          git clone --depth 1 --branch $DUCKDB_VERSION https://github.com/duckdb/duckdb.git duckdb
+          cd duckdb
+          git clone --depth 1 https://github.com/duckdb/extension-ci-tools.git extension-ci-tools
+          EXTENSION_CONFIGS="${{ github.workspace }}/extension_config.cmake" make bundle-release
+          cd ..
+          cp duckdb/build/release/extension/oracle_scanner/oracle_scanner.duckdb_extension oracle_scanner_osx_amd64.duckdb_extension
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle_scanner_osx_amd64
+          path: oracle_scanner_osx_amd64.duckdb_extension
+
+  macos-aarch64:
+    name: macOS AArch64 (Apple Silicon)
+    runs-on: macos-14
+    env:
+      GEN: ninja
+      DUCKDB_PLATFORM: osx_arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Install dependencies
+        run: |
+          brew install ninja cmake
+
+      - name: Build extension
+        shell: bash
+        env:
+          DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
+        run: |
+          git clone --depth 1 --branch $DUCKDB_VERSION https://github.com/duckdb/duckdb.git duckdb
+          cd duckdb
+          git clone --depth 1 https://github.com/duckdb/extension-ci-tools.git extension-ci-tools
+          EXTENSION_CONFIGS="${{ github.workspace }}/extension_config.cmake" make bundle-release
+          cd ..
+          cp duckdb/build/release/extension/oracle_scanner/oracle_scanner.duckdb_extension oracle_scanner_osx_arm64.duckdb_extension
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle_scanner_osx_arm64
+          path: oracle_scanner_osx_arm64.duckdb_extension
+
+  windows-x86_64:
+    name: Windows x86_64
+    runs-on: windows-2022
+    env:
+      DUCKDB_PLATFORM: windows_amd64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Build extension
+        shell: bash
+        env:
+          DUCKDB_VERSION: ${{ env.DUCKDB_VERSION }}
+        run: |
+          git clone --depth 1 --branch $DUCKDB_VERSION https://github.com/duckdb/duckdb.git duckdb
+          cd duckdb
+          git clone --depth 1 https://github.com/duckdb/extension-ci-tools.git extension-ci-tools
+          EXTENSION_CONFIGS="${{ github.workspace }}/extension_config.cmake" make bundle-release
+          cd ..
+          cp duckdb/build/release/extension/oracle_scanner/oracle_scanner.duckdb_extension oracle_scanner_windows_amd64.duckdb_extension
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle_scanner_windows_amd64
+          path: oracle_scanner_windows_amd64.duckdb_extension
+
+  create-release:
+    name: Create GitHub Release
+    needs:
+      - linux-x86_64
+      - linux-aarch64
+      - macos-x86_64
+      - macos-aarch64
+      - windows-x86_64
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: oracle_scanner ${{ github.ref_name }} (DuckDB ${{ env.DUCKDB_VERSION }} LTS)
+          body: |
+            ## oracle_scanner ${{ github.ref_name }}
+
+            DuckDB Oracle extension built for DuckDB **${{ env.DUCKDB_VERSION }} LTS**.
+
+            ### Installation
+
+            ```sql
+            INSTALL oracle_scanner FROM 'https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}';
+            LOAD oracle_scanner;
+            ```
+
+            ### Usage
+
+            ```sql
+            ATTACH 'user/password@host:1521/service' AS oracle_db (TYPE oracle);
+            SELECT * FROM oracle_db.my_table;
+            ```
+
+            ### Platforms
+
+            | Platform | File |
+            |----------|------|
+            | Linux x86_64 | oracle_scanner_linux_amd64.duckdb_extension |
+            | Linux ARM64 | oracle_scanner_linux_arm64.duckdb_extension |
+            | macOS x86_64 | oracle_scanner_osx_amd64.duckdb_extension |
+            | macOS ARM64 (Apple Silicon) | oracle_scanner_osx_arm64.duckdb_extension |
+            | Windows x86_64 | oracle_scanner_windows_amd64.duckdb_extension |
+          files: |
+            artifacts/**/*.duckdb_extension
+          draft: false
+          prerelease: false
