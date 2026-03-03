@@ -45,8 +45,8 @@ OracleCatalogSet &OracleSchemaEntry::GetCatalogSet(CatalogType type) {
 	case CatalogType::TYPE_ENTRY:
 		return types;
 	default:
-		throw InternalException("OracleSchemaEntry::GetCatalogSet - unsupported type %s",
-		                         CatalogTypeToString(type));
+		throw NotImplementedException("OracleSchemaEntry::GetCatalogSet - unsupported type %s",
+		                               CatalogTypeToString(type));
 	}
 }
 
@@ -135,6 +135,17 @@ void OracleSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 
 void OracleSchemaEntry::Scan(ClientContext &context, CatalogType type,
                                const std::function<void(CatalogEntry &)> &callback) {
+	switch (type) {
+	case CatalogType::TABLE_ENTRY:
+	case CatalogType::VIEW_ENTRY:
+	case CatalogType::INDEX_ENTRY:
+	case CatalogType::TYPE_ENTRY:
+		break;
+	default:
+		// Unsupported types (e.g. SCALAR_FUNCTION_ENTRY scanned by the UI extension)
+		// must be silently ignored to avoid a fatal InternalException that invalidates the DB.
+		return;
+	}
 	auto &oracle_transaction = OracleTransaction::Get(context, catalog);
 	auto &catalog_set = GetCatalogSet(type);
 	catalog_set.Scan(context, oracle_transaction, callback);
