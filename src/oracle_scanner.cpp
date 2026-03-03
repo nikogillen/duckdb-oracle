@@ -212,6 +212,13 @@ void OracleBindData::SetTable(OracleTableEntry &table) {
 
 static void OracleInitInternal(ClientContext &context, const OracleBindData &bind_data,
                                 OracleLocalState &lstate) {
+	// Use oracle_names (original Oracle data-dictionary case) for SQL generation.
+	// bind_data.names may have been lowercased by DuckDB's catalog pipeline; quoting
+	// a lowercased name like "emp_id" would fail because Oracle stores it as EMP_ID.
+	// oracle_names always carries the exact case returned by all_tab_columns.
+	const auto &sql_names =
+	    bind_data.oracle_names.empty() ? bind_data.names : bind_data.oracle_names;
+
 	string col_names;
 	for (auto &column_id : lstate.column_ids) {
 		if (!col_names.empty()) {
@@ -220,12 +227,12 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 		if (column_id == COLUMN_IDENTIFIER_ROW_ID) {
 			col_names += "ROWID";
 		} else {
-			col_names += OracleUtils::QuoteIdentifier(bind_data.names[column_id]);
+			col_names += OracleUtils::QuoteIdentifier(sql_names[column_id]);
 		}
 	}
 
 	string filter_string = OracleFilterPushdown::TransformFilters(
-	    lstate.column_ids, lstate.filters, bind_data.names);
+	    lstate.column_ids, lstate.filters, sql_names);
 
 	string query;
 	if (bind_data.table_name.empty()) {

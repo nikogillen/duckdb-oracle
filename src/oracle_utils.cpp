@@ -293,11 +293,9 @@ LogicalType OracleUtils::ToOracleType(const LogicalType &input) {
 }
 
 string OracleUtils::QuoteIdentifier(const string &text) {
-	// Always double-quote Oracle identifiers to preserve exact case.
-	// Oracle treats unquoted identifiers as uppercase, so any name that isn't
-	// all-uppercase (e.g. lowercase view names created with quoted identifiers)
-	// must be double-quoted to be found correctly.
-	return KeywordHelper::WriteQuoted(text, '"');
+	// Never quote Oracle identifiers — Oracle uppercases unquoted identifiers,
+	// which matches how names are stored in the data dictionary.
+	return text;
 }
 
 string OracleUtils::WriteLiteral(const string &value) {
