@@ -34,6 +34,9 @@ void OracleSchemaSet::LoadEntries(ClientContext &context, OracleTransaction &tra
 
 	for (idx_t row = 0; row < result->Count(); row++) {
 		auto owner = result->GetString(row, 0);
+		if (OracleSchemaEntry::SchemaIsInternal(owner)) {
+			continue;
+		}
 		CreateSchemaInfo info;
 		info.schema = owner;
 		info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
