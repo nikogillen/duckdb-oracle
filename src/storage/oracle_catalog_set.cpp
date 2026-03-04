@@ -13,21 +13,32 @@ optional_ptr<CatalogEntry> OracleCatalogSet::GetEntry(ClientContext &context,
                                                         OracleTransaction &transaction,
                                                         const string &name) {
 	lock_guard<mutex> l(entry_lock);
+	// 1. Cache hit — fastest path (works whether bulk-loaded or not)
+	auto it = entries.find(name);
+	if (it != entries.end()) {
+		return it->second.get();
+	}
 	if (!is_loaded) {
+		if (SupportReload()) {
+			// 2. Fast path: single-entry query instead of bulk ALL_TAB_COLUMNS scan.
+			// Skips the expensive LoadEntries on first individual table access.
+			return ReloadEntry(transaction, name);
+		}
+		// 3. No reload support (e.g. schema set): fall back to bulk load.
 		is_loaded = true;
 		LoadEntries(context, transaction);
-	}
-	auto entry = entries.find(name);
-	if (entry == entries.end()) {
-		if (SupportReload()) {
-			auto reloaded = ReloadEntry(transaction, name);
-			if (reloaded) {
-				return reloaded;
-			}
+		auto entry = entries.find(name);
+		if (entry != entries.end()) {
+			return entry->second.get();
 		}
-		return nullptr;
 	}
-	return entry->second.get();
+	// 4. Entry missing after bulk load or not in cache after fast-path.
+	// Fallback ReloadEntry handles tables created after initial load and
+	// preserves the same behaviour as the original code for this case.
+	if (SupportReload()) {
+		return ReloadEntry(transaction, name);
+	}
+	return nullptr;
 }
 
 void OracleCatalogSet::Scan(ClientContext &context, OracleTransaction &transaction,
