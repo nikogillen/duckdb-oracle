@@ -139,11 +139,6 @@ optional_ptr<SchemaCatalogEntry> OracleCatalog::LookupSchema(
     CatalogTransaction transaction, const EntryLookupInfo &schema_lookup,
     OnEntryNotFound if_not_found) {
 	auto schema_name = schema_lookup.GetEntryName();
-	// NOTE: do NOT redirect "main" → default_schema here. When DuckDB UI calls
-	// SET schema = '<catalog>.main', redirecting causes the Oracle catalog to become
-	// the default search context, which prevents DuckDB from falling through to
-	// memory.main for its own internal tables (e.g. "config"). The resulting
-	// Catalog Error for "locus.main" is non-fatal; the UI still operates correctly.
 	auto &oracle_transaction = OracleTransaction::Get(transaction.GetContext(), *this);
 	auto entry = schemas.GetEntry(transaction.GetContext(), oracle_transaction, schema_name);
 	if (!entry && if_not_found != OnEntryNotFound::RETURN_NULL) {

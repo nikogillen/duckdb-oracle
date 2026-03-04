@@ -40,12 +40,6 @@ void OracleSchemaSet::LoadEntries(ClientContext &context, OracleTransaction &tra
 		auto entry = make_shared_ptr<OracleSchemaEntry>(catalog, info);
 		entries[owner] = std::move(entry);
 	}
-	// NOTE: do NOT inject a stub "main" schema here.
-	// DuckDB UI calls SET schema = '<catalog>.main' on attach. If we make that
-	// succeed by providing a stub, DuckDB switches its default catalog to the
-	// Oracle catalog and can no longer find its own internal tables (e.g. 'config',
-	// 'task') which live in memory.main. Letting SET schema fail with a non-fatal
-	// Catalog Error keeps memory.main as the default and the UI works correctly.
 }
 
 } // namespace duckdb
