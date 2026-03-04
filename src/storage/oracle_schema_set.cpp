@@ -40,6 +40,19 @@ void OracleSchemaSet::LoadEntries(ClientContext &context, OracleTransaction &tra
 		auto entry = make_shared_ptr<OracleSchemaEntry>(catalog, info);
 		entries[owner] = std::move(entry);
 	}
+
+	// Inject a stub "main" schema so that DuckDB UI's hardcoded
+	// SET schema = '<catalog>.main' succeeds without a Catalog Error.
+	// The stub's table/index/type sets are pre-loaded and empty, so every
+	// lookup inside "main" returns nullptr immediately (no Oracle query).
+	// DuckDB then falls through to memory.main for its own internal objects
+	// (e.g. the "config" table used by the UI extension).
+	if (entries.find("main") == entries.end()) {
+		CreateSchemaInfo stub_info;
+		stub_info.schema = "main";
+		stub_info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+		entries["main"] = make_shared_ptr<OracleSchemaEntry>(catalog, stub_info);
+	}
 }
 
 } // namespace duckdb
