@@ -139,6 +139,12 @@ optional_ptr<SchemaCatalogEntry> OracleCatalog::LookupSchema(
     CatalogTransaction transaction, const EntryLookupInfo &schema_lookup,
     OnEntryNotFound if_not_found) {
 	auto schema_name = schema_lookup.GetEntryName();
+	// DuckDB internals (including the UI extension) request "main" as the default
+	// schema when connecting to an attached catalog. Redirect to the Oracle default
+	// schema (the current user) so that SET schema and qualified lookups work.
+	if (StringUtil::CIEquals(schema_name, "main") && !default_schema.empty()) {
+		schema_name = default_schema;
+	}
 	auto &oracle_transaction = OracleTransaction::Get(transaction.GetContext(), *this);
 	auto entry = schemas.GetEntry(transaction.GetContext(), oracle_transaction, schema_name);
 	if (!entry && if_not_found != OnEntryNotFound::RETURN_NULL) {
