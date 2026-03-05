@@ -45,6 +45,9 @@ public:
 protected:
 	// Called from within LoadEntries/ReloadEntry while entry_lock is already held.
 	optional_ptr<CatalogEntry> CreateEntryInternal(shared_ptr<CatalogEntry> entry);
+	// Mark a cached entry as a name-only stub that needs ReloadEntry before use.
+	// Called by LoadEntries implementations that defer column loading.
+	void MarkAsStub(const string &name);
 
 	virtual void LoadEntries(ClientContext &context, OracleTransaction &transaction) = 0;
 	virtual bool SupportReload() const {
@@ -59,6 +62,7 @@ protected:
 	OracleCatalog &catalog;
 	mutex entry_lock;
 	case_insensitive_map_t<shared_ptr<CatalogEntry>> entries;
+	case_insensitive_set_t stub_names; // name-only stubs pending column load
 	bool is_loaded = false;
 };
 

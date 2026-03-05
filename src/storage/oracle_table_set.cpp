@@ -188,25 +188,34 @@ void OracleTableSet::CreateEntries(OracleTransaction &transaction,
 // ---------------------------------------------------------------------------
 
 void OracleTableSet::LoadEntries(ClientContext &context, OracleTransaction &transaction) {
-	if (table_result) {
-		// Pre-loaded from bulk schema load - not implemented for Oracle initial version
-		table_result.reset();
-		constraint_result.reset();
+	// Fast names-only scan: just list table/view names so the schema browser
+	// loads instantly. Columns are fetched lazily via ReloadEntry on first access.
+	table_result.reset();
+	constraint_result.reset();
+
+	string q = StringUtil::Format(
+	    "SELECT table_name FROM all_tables WHERE owner = %s "
+	    "UNION SELECT view_name FROM all_views WHERE owner = %s "
+	    "ORDER BY 1",
+	    OracleUtils::WriteLiteral(StringUtil::Upper(schema.name)),
+	    OracleUtils::WriteLiteral(StringUtil::Upper(schema.name)));
+
+	auto result = transaction.Query(q);
+	if (!result) {
+		return;
 	}
-	auto col_query = GetColumnsQuery(schema.name);
-	auto con_query = GetConstraintsQuery(schema.name);
 
-	auto col_result = transaction.Query(col_query);
-	auto con_result = transaction.Query(con_query);
-
-	idx_t col_rows = col_result ? col_result->Count() : 0;
-	idx_t con_rows = con_result ? con_result->Count() : 0;
-
-	OracleResult empty_result;
-	CreateEntries(transaction,
-	              col_result ? *col_result : empty_result,
-	              con_result ? *con_result : empty_result,
-	              0, col_rows, 0, con_rows);
+	for (idx_t row = 0; row < result->Count(); row++) {
+		auto table_name = result->GetString(row, 0);
+		// Stub entry: name only, no columns. Upgraded transparently by GetEntry.
+		auto table_info = make_uniq<OracleTableInfo>(schema, table_name);
+		auto stub = make_shared_ptr<OracleTableEntry>(
+		    static_cast<Catalog &>(catalog),
+		    static_cast<SchemaCatalogEntry &>(schema),
+		    *table_info);
+		entries[table_name] = std::move(stub);
+		MarkAsStub(table_name);
+	}
 }
 
 // ---------------------------------------------------------------------------

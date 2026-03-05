@@ -16,6 +16,14 @@ optional_ptr<CatalogEntry> OracleCatalogSet::GetEntry(ClientContext &context,
 	// 1. Cache hit — fastest path (works whether bulk-loaded or not)
 	auto it = entries.find(name);
 	if (it != entries.end()) {
+		// If this is a name-only stub, upgrade it to a full entry now.
+		if (stub_names.count(name) && SupportReload()) {
+			auto full = ReloadEntry(transaction, name);
+			if (full) {
+				stub_names.erase(name);
+			}
+			return full;
+		}
 		return it->second.get();
 	}
 	if (!is_loaded) {
@@ -81,7 +89,12 @@ void OracleCatalogSet::DropEntry(OracleTransaction &transaction, DropInfo &info)
 void OracleCatalogSet::ClearEntries() {
 	lock_guard<mutex> l(entry_lock);
 	entries.clear();
+	stub_names.clear();
 	is_loaded = false;
+}
+
+void OracleCatalogSet::MarkAsStub(const string &name) {
+	stub_names.insert(name);
 }
 
 // ---------------------------------------------------------------------------
