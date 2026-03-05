@@ -63,6 +63,39 @@ ORDER BY cc.table_name, cc.constraint_name, cc.position
 )";
 }
 
+string OracleTableSet::GetSchemaColumnsQuery() {
+	// Bulk load: column info for ALL tables+views in a schema in one round-trip.
+	// all_tab_columns covers both tables and views; LEFT JOIN all_tables for num_rows.
+	// Bind :owner before executing.
+	return R"(
+SELECT c.owner, c.table_name, NVL(tbl.num_rows, 0) AS num_rows,
+       c.column_name, c.data_type, c.data_length, c.data_precision, c.data_scale,
+       c.nullable, c.column_id
+FROM all_tab_columns c
+LEFT JOIN all_tables tbl
+  ON c.owner = tbl.owner AND c.table_name = tbl.table_name
+WHERE c.owner = :owner
+ORDER BY c.table_name, c.column_id
+)";
+}
+
+string OracleTableSet::GetSchemaConstraintsQuery() {
+	// Bulk load: all PK/UK constraints for all tables in a schema in one round-trip.
+	// Bind :owner before executing.
+	return R"(
+SELECT cc.table_name, cc.constraint_name, con.constraint_type,
+       cc.column_name, cc.position
+FROM all_cons_columns cc
+JOIN all_constraints con
+  ON cc.owner           = con.owner
+ AND cc.constraint_name = con.constraint_name
+ AND cc.table_name      = con.table_name
+WHERE cc.owner = :owner
+  AND con.constraint_type IN ('P','U')
+ORDER BY cc.table_name, cc.constraint_name, cc.position
+)";
+}
+
 // ---------------------------------------------------------------------------
 // Row parsing helpers
 // ---------------------------------------------------------------------------
@@ -160,34 +193,27 @@ void OracleTableSet::CreateEntries(OracleTransaction &transaction,
 // ---------------------------------------------------------------------------
 
 void OracleTableSet::LoadEntries(ClientContext &context, OracleTransaction &transaction) {
-	// Fast names-only scan: just list table/view names so the schema browser
-	// loads instantly. Columns are fetched lazily via ReloadEntry on first access.
+	// Bulk load: fetch all column and constraint info for the whole schema in two
+	// round-trips, then build fully-populated entries via CreateEntries.
+	// This avoids N per-table round-trips when the caller scans all tables.
 	table_result.reset();
 	constraint_result.reset();
 
-	// Oracle resolves the same :owner placeholder in both branches of the UNION.
-	static const char *q =
-	    "SELECT table_name FROM all_tables WHERE owner = :owner "
-	    "UNION SELECT view_name FROM all_views WHERE owner = :owner "
-	    "ORDER BY 1";
 	unordered_map<string, string> binds = {{"owner", StringUtil::Upper(schema.name)}};
 
-	auto result = transaction.Query(q, binds);
-	if (!result) {
+	auto col_result = transaction.Query(GetSchemaColumnsQuery(), binds);
+	if (!col_result || col_result->Count() == 0) {
 		return;
 	}
 
-	for (idx_t row = 0; row < result->Count(); row++) {
-		auto table_name = result->GetString(row, 0);
-		// Stub entry: name only, no columns. Upgraded transparently by GetEntry.
-		auto table_info = make_uniq<OracleTableInfo>(schema, table_name);
-		auto stub = make_shared_ptr<OracleTableEntry>(
-		    static_cast<Catalog &>(catalog),
-		    static_cast<SchemaCatalogEntry &>(schema),
-		    *table_info);
-		entries[table_name] = std::move(stub);
-		MarkAsStub(table_name);
-	}
+	// Constraints are optional — views have none, so an empty result is fine.
+	auto con_result = transaction.Query(GetSchemaConstraintsQuery(), binds);
+	OracleResult empty_con;
+	auto &con_ref = con_result ? *con_result : empty_con;
+
+	CreateEntries(transaction, *col_result, con_ref,
+	              0, col_result->Count(),
+	              0, con_ref.Count());
 }
 
 // ---------------------------------------------------------------------------

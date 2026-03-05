@@ -44,6 +44,11 @@ public:
 	//! SQL to fetch constraint info for a specific owner+table (use :owner / :table_name bind params)
 	static string GetConstraintsQuery();
 
+	//! SQL to fetch column info for ALL tables in a schema (use :owner bind param only)
+	static string GetSchemaColumnsQuery();
+	//! SQL to fetch constraint info for ALL tables in a schema (use :owner bind param only)
+	static string GetSchemaConstraintsQuery();
+
 protected:
 	void LoadEntries(ClientContext &context, OracleTransaction &transaction) override;
 	bool SupportReload() const override {
