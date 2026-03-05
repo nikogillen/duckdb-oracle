@@ -59,7 +59,8 @@ OracleConnection OracleConnection::Open(const string &dsn, const string &attach_
 // Internal query execution: materialise all rows into OracleResult
 // ---------------------------------------------------------------------------
 
-unique_ptr<OracleResult> OracleConnection::ExecuteQuery(const string &query) {
+unique_ptr<OracleResult> OracleConnection::ExecuteQuery(const string &query,
+                                                         const unordered_map<string, string> &binds) {
 	auto conn = GetConn();
 	dpiStmt *stmt = nullptr;
 	dpiErrorInfo error_info;
@@ -71,6 +72,24 @@ unique_ptr<OracleResult> OracleConnection::ExecuteQuery(const string &query) {
 		dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);
 		throw IOException("Oracle prepare failed for query \"%s\": %s", query,
 		                  string(error_info.message));
+	}
+
+	// Bind named parameters (e.g. :owner, :table_name) by name.
+	// Keys in |binds| must match the placeholder name without the leading colon.
+	for (const auto &kv : binds) {
+		const string &name  = kv.first;
+		const string &value = kv.second;
+		dpiData bind_data;
+		// dpiData_setBytes sets isNull=0 and the asBytes fields.
+		dpiData_setBytes(&bind_data, const_cast<char *>(value.c_str()),
+		                 (uint32_t)value.size());
+		if (dpiStmt_bindValueByName(stmt, name.c_str(), (uint32_t)name.size(),
+		                             DPI_NATIVE_TYPE_BYTES, &bind_data) < 0) {
+			dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);
+			dpiStmt_release(stmt);
+			throw IOException("Oracle bind by name failed for ':%s': %s", name,
+			                  string(error_info.message));
+		}
 	}
 
 	uint32_t num_cols = 0;
@@ -208,6 +227,46 @@ unique_ptr<OracleResult> OracleConnection::Query(optional_ptr<ClientContext> con
 
 void OracleConnection::Execute(optional_ptr<ClientContext> context, const string &query) {
 	Query(context, query);
+}
+
+// ---------------------------------------------------------------------------
+// Bind-parameter overloads (named parameters via dpiStmt_bindValueByName)
+// ---------------------------------------------------------------------------
+
+unique_ptr<OracleResult> OracleConnection::TryQuery(optional_ptr<ClientContext> context,
+                                                     const string &query,
+                                                     const unordered_map<string, string> &binds,
+                                                     optional_ptr<string> error_message) {
+	lock_guard<mutex> guard(connection->connection_lock);
+	if (DebugPrintQueries()) {
+		string debug_line = query;
+		if (!binds.empty()) {
+			debug_line += "  -- binds:";
+			for (const auto &kv : binds) {
+				debug_line += " :" + kv.first + "='" + kv.second + "'";
+			}
+		}
+		Printer::Print(debug_line + "\n");
+	}
+	try {
+		return ExecuteQuery(query, binds);
+	} catch (std::exception &ex) {
+		if (error_message) {
+			*error_message = ex.what();
+		}
+		return nullptr;
+	}
+}
+
+unique_ptr<OracleResult> OracleConnection::Query(optional_ptr<ClientContext> context,
+                                                   const string &query,
+                                                   const unordered_map<string, string> &binds) {
+	string error_msg;
+	auto result = TryQuery(context, query, binds, &error_msg);
+	if (!result) {
+		throw std::runtime_error(error_msg);
+	}
+	return result;
 }
 
 void OracleConnection::Commit() {

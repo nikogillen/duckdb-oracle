@@ -77,6 +77,15 @@ unique_ptr<OracleResult> OracleTransaction::Query(const string &query) {
 	return con.Query(GetContext(), query);
 }
 
+unique_ptr<OracleResult> OracleTransaction::Query(const string &query,
+                                                    const unordered_map<string, string> &binds) {
+	auto &con = GetConnectionRaw();
+	if (transaction_state == OracleTransactionState::TRANSACTION_NOT_YET_STARTED) {
+		transaction_state = OracleTransactionState::TRANSACTION_STARTED;
+	}
+	return con.Query(GetContext(), query, binds);
+}
+
 unique_ptr<OracleResult> OracleTransaction::QueryWithoutTransaction(const string &query) {
 	auto &con = GetConnectionRaw();
 	if (transaction_state == OracleTransactionState::TRANSACTION_STARTED) {

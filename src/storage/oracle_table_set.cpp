@@ -7,6 +7,7 @@
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/parser/constraints/unique_constraint.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
+#include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
 
@@ -26,69 +27,40 @@ OracleTableSet::OracleTableSet(OracleSchemaEntry &schema,
 // Schema introspection queries
 // ---------------------------------------------------------------------------
 
-string OracleTableSet::GetColumnsQuery(const string &schema, const string &table) {
+string OracleTableSet::GetColumnsQuery() {
 	// Returns: owner, table_name, num_rows, column_name, data_type,
 	//          data_length, data_precision, data_scale, nullable, column_id
-	// Includes both tables and views (views get num_rows = 0).
-	string q = R"(
-SELECT obj.owner, obj.object_name AS table_name, NVL(tbl.num_rows, 0) AS num_rows,
+	// all_tab_columns covers both tables and views.
+	// Bind :owner and :table_name before executing.
+	return R"(
+SELECT c.owner, c.table_name, NVL(tbl.num_rows, 0) AS num_rows,
        c.column_name, c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, c.column_id
-FROM (
-    SELECT owner, table_name AS object_name FROM all_tables
-    UNION ALL
-    SELECT owner, view_name  AS object_name FROM all_views
-) obj
-JOIN all_tab_columns c
-  ON obj.owner = c.owner AND obj.object_name = c.table_name
+FROM all_tab_columns c
 LEFT JOIN all_tables tbl
-  ON obj.owner = tbl.owner AND obj.object_name = tbl.table_name
+  ON c.owner = tbl.owner AND c.table_name = tbl.table_name
+WHERE c.owner      = :owner
+  AND c.table_name = :table_name
+ORDER BY c.column_id
 )";
-	string where;
-	if (!schema.empty()) {
-		where += " WHERE obj.owner = " + OracleUtils::WriteLiteral(StringUtil::Upper(schema));
-	}
-	if (!table.empty()) {
-		if (where.empty()) {
-			where += " WHERE";
-		} else {
-			where += " AND";
-		}
-		where += " obj.object_name = " + OracleUtils::WriteLiteral(StringUtil::Upper(table));
-	}
-	q += where;
-	q += " ORDER BY obj.object_name, c.column_id";
-	return q;
 }
 
-string OracleTableSet::GetConstraintsQuery(const string &schema, const string &table) {
+string OracleTableSet::GetConstraintsQuery() {
 	// Returns: table_name, constraint_name, constraint_type, column_name, position
-	string q = R"(
+	// Bind :owner and :table_name before executing.
+	return R"(
 SELECT cc.table_name, cc.constraint_name, con.constraint_type,
        cc.column_name, cc.position
 FROM all_cons_columns cc
 JOIN all_constraints con
-  ON cc.owner = con.owner
+  ON cc.owner           = con.owner
  AND cc.constraint_name = con.constraint_name
- AND cc.table_name = con.table_name
+ AND cc.table_name      = con.table_name
+WHERE cc.owner      = :owner
+  AND cc.table_name = :table_name
+  AND con.constraint_type IN ('P','U')
+ORDER BY cc.table_name, cc.constraint_name, cc.position
 )";
-	string where;
-	if (!schema.empty()) {
-		where += " WHERE cc.owner = " + OracleUtils::WriteLiteral(StringUtil::Upper(schema));
-		where += " AND con.constraint_type IN ('P','U')";
-	}
-	if (!table.empty()) {
-		if (where.empty()) {
-			where += " WHERE con.constraint_type IN ('P','U') AND";
-		} else {
-			where += " AND";
-		}
-		where +=
-		    " cc.table_name = " + OracleUtils::WriteLiteral(StringUtil::Upper(table));
-	}
-	q += where;
-	q += " ORDER BY cc.table_name, cc.constraint_name, cc.position";
-	return q;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,14 +165,14 @@ void OracleTableSet::LoadEntries(ClientContext &context, OracleTransaction &tran
 	table_result.reset();
 	constraint_result.reset();
 
-	string q = StringUtil::Format(
-	    "SELECT table_name FROM all_tables WHERE owner = %s "
-	    "UNION SELECT view_name FROM all_views WHERE owner = %s "
-	    "ORDER BY 1",
-	    OracleUtils::WriteLiteral(StringUtil::Upper(schema.name)),
-	    OracleUtils::WriteLiteral(StringUtil::Upper(schema.name)));
+	// Oracle resolves the same :owner placeholder in both branches of the UNION.
+	static const char *q =
+	    "SELECT table_name FROM all_tables WHERE owner = :owner "
+	    "UNION SELECT view_name FROM all_views WHERE owner = :owner "
+	    "ORDER BY 1";
+	unordered_map<string, string> binds = {{"owner", StringUtil::Upper(schema.name)}};
 
-	auto result = transaction.Query(q);
+	auto result = transaction.Query(q, binds);
 	if (!result) {
 		return;
 	}
@@ -225,13 +197,14 @@ void OracleTableSet::LoadEntries(ClientContext &context, OracleTransaction &tran
 unique_ptr<OracleTableInfo> OracleTableSet::GetTableInfo(OracleTransaction &transaction,
                                                           OracleSchemaEntry &schema,
                                                           const string &table_name) {
-	auto col_query = GetColumnsQuery(schema.name, table_name);
-	auto col_result = transaction.Query(col_query);
+	unordered_map<string, string> binds = {
+	    {"owner",      StringUtil::Upper(schema.name)},
+	    {"table_name", StringUtil::Upper(table_name)}};
+	auto col_result = transaction.Query(GetColumnsQuery(), binds);
 	if (!col_result || col_result->Count() == 0) {
 		return nullptr;
 	}
-	auto con_query = GetConstraintsQuery(schema.name, table_name);
-	auto con_result = transaction.Query(con_query);
+	auto con_result = transaction.Query(GetConstraintsQuery(), binds);
 
 	auto table_info = make_uniq<OracleTableInfo>(schema, table_name);
 	idx_t col_rows = col_result->Count();
@@ -267,8 +240,10 @@ unique_ptr<OracleTableInfo> OracleTableSet::GetTableInfo(ClientContext &context,
                                                           OracleConnection &connection,
                                                           const string &schema_name,
                                                           const string &table_name) {
-	auto col_query = GetColumnsQuery(schema_name, table_name);
-	auto col_result = connection.Query(context, col_query);
+	unordered_map<string, string> binds = {
+	    {"owner",      StringUtil::Upper(schema_name)},
+	    {"table_name", StringUtil::Upper(table_name)}};
+	auto col_result = connection.Query(context, GetColumnsQuery(), binds);
 	if (!col_result || col_result->Count() == 0) {
 		throw InvalidInputException("Table %s.%s does not exist or has no columns.",
 		                             schema_name, table_name);

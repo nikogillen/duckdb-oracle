@@ -10,6 +10,7 @@
 #include "duckdb/transaction/transaction.hpp"
 #include "oracle_connection.hpp"
 #include "storage/oracle_connection_pool.hpp"
+#include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
 class OracleCatalog;
@@ -38,6 +39,8 @@ public:
 
 	string GetDSN();
 	unique_ptr<OracleResult> Query(const string &query);
+	unique_ptr<OracleResult> Query(const string &query,
+	                                const unordered_map<string, string> &binds);
 	unique_ptr<OracleResult> QueryWithoutTransaction(const string &query);
 	void Execute(const string &query);
 

@@ -39,10 +39,10 @@ public:
 	void AlterTable(ClientContext &context, OracleTransaction &transaction,
 	                AlterTableInfo &info);
 
-	//! SQL to fetch column info for a schema (and optionally a table)
-	static string GetColumnsQuery(const string &schema, const string &table = string());
-	//! SQL to fetch constraint info for a schema (and optionally a table)
-	static string GetConstraintsQuery(const string &schema, const string &table = string());
+	//! SQL to fetch column info for a specific owner+table (use :owner / :table_name bind params)
+	static string GetColumnsQuery();
+	//! SQL to fetch constraint info for a specific owner+table (use :owner / :table_name bind params)
+	static string GetConstraintsQuery();
 
 protected:
 	void LoadEntries(ClientContext &context, OracleTransaction &transaction) override;

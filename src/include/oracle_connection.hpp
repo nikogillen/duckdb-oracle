@@ -10,6 +10,7 @@
 #include "oracle_utils.hpp"
 #include "oracle_result.hpp"
 #include "duckdb/common/shared_ptr.hpp"
+#include "duckdb/common/unordered_map.hpp"
 
 namespace duckdb {
 class OracleSchemaEntry;
@@ -46,6 +47,15 @@ public:
 	unique_ptr<OracleResult> Query(optional_ptr<ClientContext> context,
 	                                const string &query);
 
+	//! Variants that bind named parameters (e.g. :owner, :table_name) via dpiStmt_bindValueByName
+	unique_ptr<OracleResult> TryQuery(optional_ptr<ClientContext> context,
+	                                   const string &query,
+	                                   const unordered_map<string, string> &binds,
+	                                   optional_ptr<string> error_message = nullptr);
+	unique_ptr<OracleResult> Query(optional_ptr<ClientContext> context,
+	                                const string &query,
+	                                const unordered_map<string, string> &binds);
+
 	void Commit();
 	void Rollback();
 
@@ -75,8 +85,9 @@ public:
 	static bool DebugPrintQueries();
 
 private:
-	//! Execute a query and materialize results into OracleResult
-	unique_ptr<OracleResult> ExecuteQuery(const string &query);
+	//! Execute a query (with optional named bind params) and materialise results.
+	unique_ptr<OracleResult> ExecuteQuery(const string &query,
+	                                       const unordered_map<string, string> &binds = {});
 
 	shared_ptr<OwnedOracleConnection> connection;
 	string dsn;
