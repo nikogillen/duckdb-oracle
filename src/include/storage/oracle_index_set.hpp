@@ -22,7 +22,6 @@ private:
 	//! Build index entries from a contiguous range of rows in an OracleResult.
 	//! Shared by both the pre-loaded and the standard Oracle query paths.
 	void PopulateFromResult(OracleResult &result, idx_t start, idx_t end);
-
 };
 
 } // namespace duckdb

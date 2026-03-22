@@ -27,18 +27,18 @@ void OracleSchemaSet::LoadEntries(ClientContext &context, OracleTransaction &tra
 	if (!schema_to_load.empty()) {
 		// Load only the requested schema
 		query = StringUtil::Format(
-		    "SELECT DISTINCT owner FROM %s WHERE owner = %s "
-		    "UNION SELECT DISTINCT owner FROM %s WHERE owner = %s",
+		    "SELECT DISTINCT LOWER(owner) FROM %s WHERE owner = %s "
+		    "UNION SELECT DISTINCT LOWER(owner) FROM %s WHERE owner = %s",
 		    tbl_view, OracleUtils::WriteLiteral(StringUtil::Upper(schema_to_load)),
 		    vw_view,  OracleUtils::WriteLiteral(StringUtil::Upper(schema_to_load)));
 	} else if (level == OraclePrivilegeLevel::USER) {
 		// USER level: only the current user's own schema — no query needed, just use SELECT USER
-		query = "SELECT USER FROM DUAL";
+		query = "SELECT LOWER(USER) FROM DUAL";
 	} else {
 		// ALL or DBA: load all visible schemas/owners, filtering internal ones in SQL
 		query = StringUtil::Format(
-		    "SELECT DISTINCT owner FROM %s WHERE owner NOT IN (%s) "
-		    "UNION SELECT DISTINCT owner FROM %s WHERE owner NOT IN (%s) "
+		    "SELECT DISTINCT LOWER(owner) FROM %s WHERE owner NOT IN (%s) "
+		    "UNION SELECT DISTINCT LOWER(owner) FROM %s WHERE owner NOT IN (%s) "
 		    "ORDER BY 1",
 		    tbl_view, internal_sql, vw_view, internal_sql);
 	}

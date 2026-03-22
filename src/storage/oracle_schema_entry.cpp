@@ -14,7 +14,6 @@ OracleSchemaEntry::OracleSchemaEntry(Catalog &catalog, CreateSchemaInfo &info)
       types(*this) {
 }
 
-
 // Single source of truth for Oracle internal schema names.
 static const vector<string> &OracleInternalSchemaNames() {
 	static const vector<string> schemas = {

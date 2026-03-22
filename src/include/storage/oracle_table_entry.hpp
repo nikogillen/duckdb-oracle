@@ -25,10 +25,13 @@ struct OracleTableInfo {
 
 	optional_ptr<OracleSchemaEntry> schema;
 	string schema_name;
+	//! The Oracle owner name used in DML/DDL (from schema.oracle_name, not schema.name)
+	string oracle_schema_name;
 	unique_ptr<CreateTableInfo> create_info;
 	vector<OracleType> oracle_types;
 	vector<string> oracle_names; // column names as stored in data dictionary
 	idx_t approx_num_rows = 0;
+	bool is_view = false;        // true if the Oracle object is a VIEW
 };
 
 class OracleTableEntry : public TableCatalogEntry {
@@ -55,6 +58,7 @@ public:
 	//! The actual Oracle schema (owner) name for Oracle DML/scan queries.
 	//! Equals schema.name for normal schemas; equals the default schema for the "main" alias.
 	string oracle_schema_name;
+	bool is_view = false;        // true if the Oracle object is a VIEW
 	//! The column names as stored in Oracle data dictionary (may differ in case)
 	vector<string> oracle_names;
 	vector<OracleType> oracle_types;

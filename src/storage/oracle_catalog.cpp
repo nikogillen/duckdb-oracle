@@ -27,7 +27,7 @@ OracleCatalog::OracleCatalog(AttachedDatabase &db_p, string connection_string_p,
 		// Open a temp connection to get current user
 		try {
 			auto con = connection_pool.GetConnection();
-			auto result = con.GetConnection().Query(context, "SELECT USER FROM DUAL");
+			auto result = con.GetConnection().Query(context, "SELECT LOWER(USER) FROM DUAL");
 			if (result && result->Count() > 0) {
 				default_schema = result->GetString(0, 0);
 			}
@@ -35,7 +35,7 @@ OracleCatalog::OracleCatalog(AttachedDatabase &db_p, string connection_string_p,
 			// fallback
 		}
 	} else {
-		default_schema = StringUtil::Upper(schema_to_load);
+		default_schema = StringUtil::Lower(schema_to_load);
 	}
 
 	// Get Oracle version

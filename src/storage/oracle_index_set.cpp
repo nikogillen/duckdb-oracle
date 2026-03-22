@@ -51,8 +51,8 @@ void OracleIndexSet::LoadEntries(ClientContext &context, OracleTransaction &tran
 	if (level == OraclePrivilegeLevel::USER ||
 	    (level == OraclePrivilegeLevel::ALL && schema.IsCurrentUserSchema())) {
 		query = R"(
-SELECT i.index_name, i.table_name, i.uniqueness,
-       ic.column_name, ic.column_position
+SELECT LOWER(i.index_name), LOWER(i.table_name), i.uniqueness,
+       LOWER(ic.column_name), ic.column_position
 FROM user_indexes i
 JOIN user_ind_columns ic
   ON i.index_name = ic.index_name
@@ -63,8 +63,8 @@ ORDER BY i.index_name, ic.column_position
 		const char *idx_view = (level == OraclePrivilegeLevel::DBA) ? "dba_indexes"     : "all_indexes";
 		const char *ic_view  = (level == OraclePrivilegeLevel::DBA) ? "dba_ind_columns" : "all_ind_columns";
 		query = StringUtil::Format(R"(
-SELECT i.index_name, i.table_name, i.uniqueness,
-       ic.column_name, ic.column_position
+SELECT LOWER(i.index_name), LOWER(i.table_name), i.uniqueness,
+       LOWER(ic.column_name), ic.column_position
 FROM %s i
 JOIN %s ic ON i.owner = ic.index_owner
   AND i.index_name = ic.index_name

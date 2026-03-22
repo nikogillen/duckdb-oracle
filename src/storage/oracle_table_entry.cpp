@@ -13,14 +13,14 @@ namespace duckdb {
 // ---------------------------------------------------------------------------
 
 OracleTableInfo::OracleTableInfo(OracleSchemaEntry &schema, const string &table_name)
-    : schema(&schema), schema_name(schema.name) {
+    : schema(&schema), schema_name(schema.name), oracle_schema_name(schema.oracle_name) {
 	create_info = make_uniq<CreateTableInfo>();
 	create_info->schema = schema.name;
 	create_info->table = table_name;
 }
 
 OracleTableInfo::OracleTableInfo(const string &schema_name, const string &table_name)
-    : schema(nullptr), schema_name(schema_name) {
+    : schema(nullptr), schema_name(schema_name), oracle_schema_name(schema_name) {
 	create_info = make_uniq<CreateTableInfo>();
 	create_info->schema = schema_name;
 	create_info->table = table_name;
@@ -34,6 +34,7 @@ OracleTableEntry::OracleTableEntry(Catalog &catalog, SchemaCatalogEntry &schema,
                                     OracleTableInfo &info)
     : TableCatalogEntry(catalog, schema, *info.create_info),
       oracle_schema_name(schema.Cast<OracleSchemaEntry>().oracle_name),
+      is_view(info.is_view),
       oracle_names(info.oracle_names), oracle_types(info.oracle_types),
       approx_num_rows(info.approx_num_rows) {
 }
