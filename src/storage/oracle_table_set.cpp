@@ -269,9 +269,9 @@ void OracleTableSet::LoadEntries(ClientContext &context, OracleTransaction &tran
 		info.is_view = is_view;
 		auto table_entry = make_shared_ptr<OracleTableEntry>(
 		    static_cast<Catalog &>(catalog), static_cast<SchemaCatalogEntry &>(schema), info);
-		if (is_view) {
-			table_entry->type = CatalogType::VIEW_ENTRY;
-		}
+		// Oracle views are scanned like tables via our scanner — keep TABLE_ENTRY type.
+		// Setting VIEW_ENTRY would cause duckdb_views() to cast us to ViewCatalogEntry
+		// (wrong base class) leading to UB and GetStorage() crashes.
 		CreateEntryInternal(std::move(table_entry));
 		MarkAsStub(table_name);
 	}
@@ -384,9 +384,7 @@ optional_ptr<CatalogEntry> OracleTableSet::ReloadEntry(OracleTransaction &transa
 	auto table_entry = make_shared_ptr<OracleTableEntry>(
 	    static_cast<Catalog &>(catalog), static_cast<SchemaCatalogEntry &>(schema),
 	    *table_info);
-	if (table_info->is_view) {
-		table_entry->type = CatalogType::VIEW_ENTRY;
-	}
+	// Oracle views stay as TABLE_ENTRY — see LoadEntries comment.
 	return CreateEntryInternal(std::move(table_entry));
 }
 
