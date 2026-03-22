@@ -15,6 +15,7 @@ add_library(
   oracle_schema_set.cpp
   oracle_table_entry.cpp
   oracle_table_set.cpp
+  oracle_view_entry.cpp
   oracle_transaction.cpp
   oracle_transaction_manager.cpp
   oracle_type_entry.cpp

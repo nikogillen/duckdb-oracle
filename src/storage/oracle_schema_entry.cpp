@@ -2,6 +2,8 @@
 #include "storage/oracle_catalog.hpp"
 #include "storage/oracle_transaction.hpp"
 #include "storage/oracle_table_set.hpp"
+#include "storage/oracle_table_entry.hpp"
+#include "storage/oracle_view_entry.hpp"
 #include "storage/oracle_index_entry.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/parser/parsed_data/alter_info.hpp"
@@ -154,9 +156,34 @@ void OracleSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 
 void OracleSchemaEntry::Scan(ClientContext &context, CatalogType type,
                                const std::function<void(CatalogEntry &)> &callback) {
+	auto &oracle_transaction = OracleTransaction::Get(context, catalog);
+
+	if (type == CatalogType::TABLE_ENTRY) {
+		// duckdb_tables() expects TABLE_ENTRY entries only (no views).
+		// Filter out Oracle view stubs so they don't appear as "BASE TABLE".
+		tables.Scan(context, oracle_transaction, [&](CatalogEntry &entry) {
+			if (!entry.Cast<OracleTableEntry>().is_view) {
+				callback(entry);
+			}
+		});
+		return;
+	}
+
+	if (type == CatalogType::VIEW_ENTRY) {
+		// duckdb_views() expects VIEW_ENTRY entries that can be safely cast to
+		// ViewCatalogEntry.  OracleTableEntry (extends TableCatalogEntry) cannot
+		// be cast that way, so we synthesise a lightweight OracleViewEntry stub
+		// for each Oracle view and pass that to the callback instead.
+		tables.Scan(context, oracle_transaction, [&](CatalogEntry &entry) {
+			if (entry.Cast<OracleTableEntry>().is_view) {
+				OracleViewEntry view_entry(catalog, *this, entry.name);
+				callback(view_entry);
+			}
+		});
+		return;
+	}
+
 	switch (type) {
-	case CatalogType::TABLE_ENTRY:
-	case CatalogType::VIEW_ENTRY:
 	case CatalogType::INDEX_ENTRY:
 	case CatalogType::TYPE_ENTRY:
 		break;
@@ -165,7 +192,6 @@ void OracleSchemaEntry::Scan(ClientContext &context, CatalogType type,
 		// must be silently ignored to avoid a fatal InternalException that invalidates the DB.
 		return;
 	}
-	auto &oracle_transaction = OracleTransaction::Get(context, catalog);
 	auto &catalog_set = GetCatalogSet(type);
 	catalog_set.Scan(context, oracle_transaction, callback);
 }
