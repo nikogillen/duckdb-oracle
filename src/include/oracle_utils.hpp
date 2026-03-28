@@ -86,6 +86,10 @@ public:
 	//! Write a quoted string literal for Oracle SQL (single quotes, escape single quotes)
 	static string WriteLiteral(const string &value);
 
+	//! Format a DuckDB Value as an Oracle SQL literal for use in DML statements.
+	//! Handles NULL, numeric, string, date, timestamp, and boolean types.
+	static string ValueToOracleSQL(const Value &val);
+
 private:
 	static dpiContext *g_dpi_context;
 	static mutex g_context_mutex;

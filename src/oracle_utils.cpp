@@ -1,5 +1,9 @@
 #include "oracle_utils.hpp"
 
+#include "duckdb/common/types/date.hpp"
+#include "duckdb/common/types/time.hpp"
+#include "duckdb/common/types/timestamp.hpp"
+
 #include <cctype>
 #include <cstring>
 
@@ -309,6 +313,53 @@ string OracleUtils::WriteLiteral(const string &value) {
 	}
 	result += "'";
 	return result;
+}
+
+string OracleUtils::ValueToOracleSQL(const Value &val) {
+	if (val.IsNull()) {
+		return "NULL";
+	}
+	switch (val.type().id()) {
+	case LogicalTypeId::BOOLEAN:
+		return val.GetValue<bool>() ? "1" : "0";
+	case LogicalTypeId::TINYINT:
+	case LogicalTypeId::SMALLINT:
+	case LogicalTypeId::INTEGER:
+	case LogicalTypeId::BIGINT:
+	case LogicalTypeId::UTINYINT:
+	case LogicalTypeId::USMALLINT:
+	case LogicalTypeId::UINTEGER:
+	case LogicalTypeId::UBIGINT:
+	case LogicalTypeId::FLOAT:
+	case LogicalTypeId::DOUBLE:
+	case LogicalTypeId::DECIMAL:
+	case LogicalTypeId::HUGEINT:
+		return val.ToString();
+	case LogicalTypeId::VARCHAR:
+	case LogicalTypeId::BLOB:
+		return WriteLiteral(val.ToString());
+	case LogicalTypeId::DATE: {
+		auto d = DateValue::Get(val);
+		int32_t y, mo, day;
+		Date::Convert(d, y, mo, day);
+		return StringUtil::Format("DATE '%04d-%02d-%02d'", y, mo, day);
+	}
+	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIMESTAMP_SEC:
+	case LogicalTypeId::TIMESTAMP_MS:
+	case LogicalTypeId::TIMESTAMP_NS: {
+		auto ts = TimestampValue::Get(val);
+		auto d = Timestamp::GetDate(ts);
+		auto t = Timestamp::GetTime(ts);
+		int32_t y, mo, day, h, m, s, micros;
+		Date::Convert(d, y, mo, day);
+		Time::Convert(t, h, m, s, micros);
+		return StringUtil::Format("TIMESTAMP '%04d-%02d-%02d %02d:%02d:%02d.%06d'",
+		                          y, mo, day, h, m, s, micros);
+	}
+	default:
+		return WriteLiteral(val.ToString());
+	}
 }
 
 } // namespace duckdb

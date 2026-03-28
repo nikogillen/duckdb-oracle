@@ -48,6 +48,17 @@ public:
 
 	optional_ptr<CatalogEntry> ReferenceEntry(shared_ptr<CatalogEntry> &entry);
 
+	// Rowid registry: populated during UPDATE/DELETE scans.
+	// The BIGINT row ID in the scan output is an index into this vector.
+	vector<string> rowid_registry;
+	void ClearRowidRegistry() { rowid_registry.clear(); }
+	int64_t RegisterRowid(const char *ptr, uint32_t len) {
+		int64_t idx = (int64_t)rowid_registry.size();
+		rowid_registry.emplace_back(ptr, len);
+		return idx;
+	}
+	const string &LookupRowid(int64_t idx) const { return rowid_registry[(idx_t)idx]; }
+
 private:
 	OraclePoolConnection connection;
 	OracleTransactionState transaction_state;
