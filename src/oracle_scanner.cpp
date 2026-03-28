@@ -13,6 +13,7 @@
 #include "storage/oracle_catalog.hpp"
 #include "storage/oracle_transaction.hpp"
 #include "storage/oracle_table_set.hpp"
+#include "duckdb/transaction/transaction.hpp"
 
 namespace duckdb {
 
@@ -25,8 +26,9 @@ enum class OracleReadResult { CHUNK_DONE, FINISHED };
 class OracleReader {
 public:
 	OracleReader(OracleConnection &conn, const vector<column_t> &column_ids,
-	              const OracleBindData &bind_data)
-	    : connection(conn), column_ids(column_ids), bind_data(bind_data) {
+	              const OracleBindData &bind_data, vector<string> *rowid_registry = nullptr)
+	    : connection(conn), column_ids(column_ids), bind_data(bind_data),
+	      rowid_registry_(rowid_registry) {
 	}
 
 	~OracleReader() {
@@ -97,7 +99,22 @@ public:
 				auto &out_col = output.data[proj_idx];
 
 				if (col_id == COLUMN_IDENTIFIER_ROW_ID) {
-					// Use ROWID column (col 0 in query) or set null
+					if (rowid_registry_) {
+						uint32_t query_col = (uint32_t)(proj_idx + 1);
+						dpiNativeTypeNum native_type;
+						dpiData *data;
+						if (dpiStmt_getQueryValue(stmt, query_col, &native_type, &data) >= 0 &&
+						    !data->isNull && native_type == DPI_NATIVE_TYPE_ROWID) {
+							const char *ptr = nullptr;
+							uint32_t len = 0;
+							if (dpiRowid_getStringValue(data->value.asRowid, &ptr, &len) == 0 && ptr) {
+								int64_t idx = (int64_t)rowid_registry_->size();
+								rowid_registry_->emplace_back(ptr, len);
+								FlatVector::GetData<int64_t>(out_col)[output_offset] = idx;
+								continue;
+							}
+						}
+					}
 					FlatVector::SetNull(out_col, output_offset, true);
 					continue;
 				}
@@ -131,6 +148,7 @@ private:
 	OracleConnection &connection;
 	const vector<column_t> &column_ids;
 	const OracleBindData &bind_data;
+	vector<string> *rowid_registry_;
 	dpiStmt *stmt = nullptr;
 	uint32_t num_cols = 0;
 	vector<dpiQueryInfo> col_info;
@@ -154,6 +172,8 @@ struct OracleLocalState : public LocalTableFunctionState {
 	OracleConnection connection;
 	OraclePoolConnection pool_connection;
 	unique_ptr<OracleReader> reader;
+	// Set during UPDATE/DELETE materialization to collect Oracle ROWID strings.
+	vector<string> *rowid_registry = nullptr;
 
 	void ScanChunk(ClientContext &context, const OracleBindData &bind_data,
 	               OracleGlobalState &gstate, DataChunk &output);
@@ -331,6 +351,20 @@ OracleInitGlobalState(ClientContext &context, TableFunctionInitInput &input) {
 
 		auto local_state = GetLocalState(context, input, *result);
 		auto &lstate = local_state->Cast<OracleLocalState>();
+
+		// Wire up the rowid registry if this scan projects COLUMN_IDENTIFIER_ROW_ID
+		// (used for UPDATE/DELETE to map BIGINT indices → Oracle ROWID strings).
+		if (ora_catalog) {
+			bool has_rowid = false;
+			for (auto col_id : input.column_ids) {
+				if (col_id == COLUMN_IDENTIFIER_ROW_ID) { has_rowid = true; break; }
+			}
+			if (has_rowid) {
+				auto &transaction = Transaction::Get(context, *ora_catalog).Cast<OracleTransaction>();
+				transaction.ClearRowidRegistry();
+				lstate.rowid_registry = &transaction.rowid_registry;
+			}
+		}
 		ColumnDataAppendState append_state;
 		materialized->InitializeAppend(append_state);
 		while (true) {
@@ -411,7 +445,7 @@ void OracleLocalState::ScanChunk(ClientContext &context, const OracleBindData &b
 		return;
 	}
 	if (!reader) {
-		reader = make_uniq<OracleReader>(connection, column_ids, bind_data);
+		reader = make_uniq<OracleReader>(connection, column_ids, bind_data, rowid_registry);
 	}
 	if (!exec) {
 		reader->BeginQuery(context, sql);

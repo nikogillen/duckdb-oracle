@@ -35,11 +35,12 @@ SinkResultType OracleUpdate::Sink(ExecutionContext &context, DataChunk &chunk,
 	idx_t ncols = columns.size();
 
 	for (idx_t row = 0; row < chunk.size(); row++) {
-		auto rowid_val = chunk.GetValue(ncols, row); // ROWID is after the updated cols
+		auto rowid_val = chunk.GetValue(ncols, row); // ROWID index is after the updated cols
 		if (rowid_val.IsNull()) {
 			continue;
 		}
-		auto rowid = StringValue::Get(rowid_val);
+		int64_t rowid_idx = rowid_val.GetValue<int64_t>();
+		const auto &rowid = transaction.LookupRowid(rowid_idx);
 
 		string sql = "UPDATE " +
 		             OracleUtils::QuoteIdentifier(oracle_table.oracle_schema_name) + "." +
@@ -49,11 +50,7 @@ SinkResultType OracleUpdate::Sink(ExecutionContext &context, DataChunk &chunk,
 			auto &col = oracle_table.GetColumns().GetColumn(columns[c]);
 			sql += OracleUtils::QuoteIdentifier(col.Name()) + " = ";
 			auto val = chunk.GetValue(c, row);
-			if (val.IsNull()) {
-				sql += "NULL";
-			} else {
-				sql += OracleUtils::WriteLiteral(val.ToString());
-			}
+			sql += OracleUtils::ValueToOracleSQL(val);
 		}
 		sql += " WHERE ROWID = " + OracleUtils::WriteLiteral(rowid);
 		connection.Execute(context.client, sql);

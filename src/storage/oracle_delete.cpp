@@ -28,15 +28,17 @@ unique_ptr<GlobalSinkState> OracleDelete::GetGlobalSinkState(ClientContext &cont
 SinkResultType OracleDelete::Sink(ExecutionContext &context, DataChunk &chunk,
                                    OperatorSinkInput &input) const {
 	auto &gstate = input.global_state.Cast<OracleDeleteGlobalState>();
-	// Collect ROWIDs from the ROWID column (last column in the chunk)
-	// This requires the scan to emit ctid (ROWID in Oracle) - see oracle_scanner
-	// For simplicity, delete the entire table row by rowid from the scan's
-	// emitted values. DuckDB passes the __rowid column as a VARCHAR ROWID.
-	auto &rowid_col = chunk.data[chunk.ColumnCount() - 1];
+	auto &oracle_table = table.Cast<OracleTableEntry>();
+	auto &transaction = OracleTransaction::Get(context.client, oracle_table.catalog);
+
+	// The last column in the chunk is the BIGINT rowid index into the transaction's
+	// rowid_registry (populated during the materialized scan).
+	idx_t rowid_col_idx = chunk.ColumnCount() - 1;
 	for (idx_t i = 0; i < chunk.size(); i++) {
-		auto val = chunk.GetValue(chunk.ColumnCount() - 1, i);
+		auto val = chunk.GetValue(rowid_col_idx, i);
 		if (!val.IsNull()) {
-			gstate.rowids.push_back(StringValue::Get(val));
+			int64_t rowid_idx = val.GetValue<int64_t>();
+			gstate.rowids.push_back(transaction.LookupRowid(rowid_idx));
 		}
 	}
 	gstate.deleted_count += chunk.size();
