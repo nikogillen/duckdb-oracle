@@ -91,6 +91,32 @@ duckdb
 
 The trace is written to stderr. Redirect it to a file with `2>odpi.log`.
 
+## DML — UPDATE and DELETE
+
+`UPDATE` and `DELETE` are supported and work as expected from DuckDB:
+
+```sql
+UPDATE mydb.hr.employees SET salary = 5000  WHERE employee_id = 100;
+UPDATE mydb.hr.employees SET salary = salary * 1.1 WHERE department_id = 10;
+DELETE FROM mydb.hr.employees WHERE employee_id = 100;
+```
+
+### How row identity works (ROWID)
+
+DuckDB evaluates the `SET` expressions and `WHERE` filter on its side and then hands each affected row — along with its **computed new values** — to the Oracle extension one row at a time. The extension must therefore identify each individual Oracle row precisely so it can write back the correct value.
+
+The extension uses Oracle's `ROWID` pseudo-column for this:
+
+1. **Scan phase** — the Oracle scan includes `ROWID` alongside the projected columns. Each row's 18-character ROWID string is stored in a per-transaction registry; a BIGINT index is written into DuckDB's internal row-ID slot.
+2. **Write phase** — for each row in the result the extension looks up the ROWID string and executes:
+   ```sql
+   UPDATE schema.table SET col = <value> WHERE ROWID = 'AAABozAAEAAAAGSAAA'
+   ```
+
+Using `ROWID` is necessary — not just a convenience — because DuckDB evaluates expressions like `salary * 1.1` itself before calling the extension. At write-back time the extension only receives the already-computed numeric result (e.g. `5500.00`), not the original expression. A WHERE-clause-only approach would reapply the same WHERE to every row in the batch, meaning all rows would get the value that was computed for the *last* row scanned. `ROWID` ensures each computed value reaches exactly the row it was read from, matching what Oracle's own `UPDATE … SET col = col * 1.1` would produce.
+
+> **Note:** ROWID targets the physical row at scan time. If another session moves the row (e.g. via a table reorganisation or `ALTER TABLE … MOVE`) between the scan and the write-back, the update will silently skip that row. For normal OLTP workloads this is not a concern.
+
 ## How it works
 
 - **Schema browser** — on first `ATTACH`, a lightweight `all_tables UNION ALL all_views` query enumerates table/view names per schema. No column data is fetched yet, so the UI loads instantly regardless of schema size.
