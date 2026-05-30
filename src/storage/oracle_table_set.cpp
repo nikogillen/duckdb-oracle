@@ -83,7 +83,7 @@ ORDER BY 1
 string OracleTableSet::GetUserColumnsQuery() {
 	// Same column layout as GetColumnsQuery(). Bind :table_name only.
 	return R"(
-SELECT LOWER(USER) AS owner, LOWER(c.table_name), 0 AS num_rows,
+SELECT LOWER(USER) AS owner, LOWER(c.table_name), NVL(t.num_rows, 0) AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'BASE TABLE' AS table_type, c.column_id
 FROM user_tab_columns c

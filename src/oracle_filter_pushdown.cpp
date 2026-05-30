@@ -65,6 +65,19 @@ static string TransformConstantFilter(const string &col_name, ConstantFilter &fi
 		                              y, mo, day, h, m, s, micros);
 		break;
 	}
+	case LogicalTypeId::TIMESTAMP_TZ: {
+		// Push as UTC literal — Oracle TIMESTAMP WITH TIME ZONE accepts AT TIME ZONE 'UTC'
+		auto ts = TimestampValue::Get(val);
+		auto d = Timestamp::GetDate(ts);
+		auto t = Timestamp::GetTime(ts);
+		int32_t y, mo, day, h, m, s, micros;
+		Date::Convert(d, y, mo, day);
+		Time::Convert(t, h, m, s, micros);
+		val_str = StringUtil::Format(
+		    "TIMESTAMP '%04d-%02d-%02d %02d:%02d:%02d.%06d' AT TIME ZONE 'UTC'",
+		    y, mo, day, h, m, s, micros);
+		break;
+	}
 	default:
 		val_str = val.ToString();
 		break;
