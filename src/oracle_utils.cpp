@@ -119,9 +119,23 @@ LogicalType OracleUtils::TypeToLogicalType(const OracleTypeData &type_info,
                                             OracleType &oracle_type) {
 	auto type_name = StringUtil::Upper(type_info.type_name);
 
-	// Strip trailing precision info from type name, e.g. "TIMESTAMP(6)" -> "TIMESTAMP"
+	// Strip inline precision from type name while preserving suffixes.
+	// e.g. "TIMESTAMP(6)"                   -> "TIMESTAMP"
+	//      "TIMESTAMP(6) WITH TIME ZONE"     -> "TIMESTAMP WITH TIME ZONE"
+	//      "TIMESTAMP(6) WITH LOCAL TIME ZONE" -> "TIMESTAMP WITH LOCAL TIME ZONE"
+	string base_type;
 	auto paren_pos = type_name.find('(');
-	string base_type = (paren_pos != string::npos) ? type_name.substr(0, paren_pos) : type_name;
+	if (paren_pos != string::npos) {
+		auto close_pos = type_name.find(')', paren_pos);
+		if (close_pos != string::npos && close_pos + 1 < type_name.size()) {
+			// Rejoin: everything before '(' + everything after ')'
+			base_type = type_name.substr(0, paren_pos) + type_name.substr(close_pos + 1);
+		} else {
+			base_type = type_name.substr(0, paren_pos);
+		}
+	} else {
+		base_type = type_name;
+	}
 	StringUtil::Trim(base_type);
 
 	if (base_type == "NUMBER" || base_type == "NUMERIC" || base_type == "DECIMAL") {
