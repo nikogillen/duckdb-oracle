@@ -1,19 +1,13 @@
 # Changelog
 
-## v1.4.5 (2026-07-24) — DuckDB 1.4.5 LTS
+## v1.5.5 (2026-07-24) — DuckDB 1.5.5
 
-Patch release on the 1.4.x LTS line, backporting fixes from v1.5.4.
-
-### Fixes
-
-- Fix `TIMESTAMP WITH TIME ZONE` type being truncated to plain `TIMESTAMP`
-- Fix `num_rows` returning hardcoded 0 for base tables (now reads from `user_tables`)
-- Fix `TIMESTAMP_TZ` filter pushdown to emit correct Oracle `AT TIME ZONE 'UTC'` literal
+Bump to DuckDB **v1.5.5**.
 
 ### Dependencies
 
 - [ODPI-C v5.3.0](https://github.com/oracle/odpi) — Oracle Database Programming Interface for C
-- [DuckDB v1.4.5](https://github.com/duckdb/duckdb/releases/tag/v1.4.5) — LTS release
+- [DuckDB v1.5.5](https://github.com/duckdb/duckdb/releases/tag/v1.5.5)
 
 ---
 
