@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5.5 (2026-07-24) — DuckDB 1.5.5
+
+Bump to DuckDB **v1.5.5**.
+
+### Dependencies
+
+- [ODPI-C v5.3.0](https://github.com/oracle/odpi) — Oracle Database Programming Interface for C
+- [DuckDB v1.5.5](https://github.com/duckdb/duckdb/releases/tag/v1.5.5)
+
+---
+
 ## v1.5.4 (2026-06-19) — DuckDB 1.5.4
 
 Bump to DuckDB **v1.5.4**.
