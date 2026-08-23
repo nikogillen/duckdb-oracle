@@ -14,14 +14,19 @@ set(CMAKE_CXX_FLAGS_RELEASE
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
     "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} ${ORACLE_SCANNER_EXTRA_CFLAGS}")
 
-# Download ODPI-C if not present
+# Download ODPI-C if not present (normally it is vendored in ./odpi and this
+# fallback never runs). Pin the exact release and verify its SHA-256 + TLS so a
+# tampered or MITM'd archive cannot be compiled silently.
 if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/odpi)
   message(STATUS "Downloading ODPI-C source code")
   file(
     DOWNLOAD
-    "https://github.com/oracle/odpi/archive/refs/tags/v5.3.0.tar.gz"
+    "https://github.com/oracle/odpi/archive/refs/tags/v6.0.0.tar.gz"
     ${CMAKE_CURRENT_SOURCE_DIR}/odpi.tar.gz
     SHOW_PROGRESS
+    TLS_VERIFY ON
+    EXPECTED_HASH
+      SHA256=86c3ab03bb58efe259755db398962324e1401c1e2ea4c535fd47d236206e092b
     STATUS ODPI_DOWNLOAD_RESULT)
 
   list(GET ODPI_DOWNLOAD_RESULT 0 ODPI_DOWNLOAD_STATUS)

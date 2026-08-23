@@ -5,6 +5,9 @@ build/
 # DuckDB build tree (cloned locally for compilation, never committed)
 duckdb/
 
+# ODPI-C is fetched at build time by CMake (pinned version + SHA-256), not vendored
+odpi/
+
 # Local Oracle client / credentials — must never enter this public repo
 .env*
 *.ora
