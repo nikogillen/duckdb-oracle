@@ -87,14 +87,21 @@ jobs:
         with:
           subject-path: "dist/*.duckdb_extension"
 
-      - name: Create GitHub Release
+      - name: Publish to GitHub Release
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${{ github.ref_name }}" \
-            dist/*.duckdb_extension dist/SHA256SUMS \
-            --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          TAG="${{ github.ref_name }}"
+          # Attach assets to an existing release (e.g. one created by hand with custom
+          # notes); otherwise create the release. --clobber overwrites assets on re-runs.
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.duckdb_extension dist/SHA256SUMS \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" dist/*.duckdb_extension dist/SHA256SUMS \
+              --repo "${{ github.repository }}" \
+              --title "$TAG" \
+              --generate-notes
+          fi

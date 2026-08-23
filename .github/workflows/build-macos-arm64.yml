@@ -14,9 +14,9 @@ on:
     branches:
       - main
       - "feature/**"
-    tags:
-      - "v*"
   workflow_dispatch:
+# Tag builds (v*) are handled by the release pipeline (release.yml), so this
+# smoke-build workflow does not also trigger on tags.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
