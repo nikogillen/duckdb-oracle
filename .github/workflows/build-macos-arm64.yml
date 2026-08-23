@@ -1,0 +1,74 @@
+name: Build macOS arm64 (self-hosted)
+
+# Baut die Oracle-Extension nativ für macOS Apple Silicon (osx_arm64) auf dem
+# selbst-gehosteten macOS-Runner.
+#
+# SICHERHEIT (öffentliches Repo!): Dieser Job läuft NUR auf `push` in Branches
+# dieses Repos und auf manuelle Auslösung (`workflow_dispatch`). Er reagiert
+# bewusst NICHT auf `pull_request`, weil bei öffentlichen Repos jeder per Fork-PR
+# Code einschleusen könnte, der sonst auf dem self-hosted Runner (= deiner Hardware)
+# ausgeführt würde. Fork-PRs werden stattdessen im Linux-CI auf einem flüchtigen,
+# GitHub-gehosteten Runner getestet (siehe ci-linux-oracle.yml).
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DUCKDB_VERSION: v1.5.5
+
+jobs:
+  build:
+    name: macOS arm64
+    # Labels ggf. an deinen Runner anpassen (Actions > Runners zeigt die Labels).
+    runs-on: [self-hosted, macOS, ARM64]
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout DuckDB ${{ env.DUCKDB_VERSION }}
+        uses: actions/checkout@v4
+        with:
+          repository: duckdb/duckdb
+          ref: ${{ env.DUCKDB_VERSION }}
+          path: duckdb
+          fetch-depth: 0
+
+      - name: Checkout extension-ci-tools
+        uses: actions/checkout@v4
+        with:
+          repository: duckdb/extension-ci-tools
+          path: duckdb/extension-ci-tools
+          fetch-depth: 1
+
+      - name: Build (release, osx_arm64)
+        working-directory: duckdb
+        env:
+          GEN: ninja
+          DUCKDB_PLATFORM: osx_arm64
+          EXTENSION_CONFIGS: ${{ github.workspace }}/extension_config.cmake
+        run: make release
+
+      - name: Smoke test — load the extension
+        working-directory: duckdb
+        run: |
+          EXT="build/release/repository/${DUCKDB_VERSION}/osx_arm64/oracle.duckdb_extension"
+          ./build/release/duckdb -unsigned -c "LOAD '$(pwd)/${EXT}'; SELECT 'loaded' AS status;"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-osx_arm64
+          path: duckdb/build/release/repository/${{ env.DUCKDB_VERSION }}/osx_arm64/oracle.duckdb_extension
+          if-no-files-found: error
