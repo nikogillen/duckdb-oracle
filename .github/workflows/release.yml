@@ -36,7 +36,7 @@ jobs:
     with:
       extension_name: oracle
       duckdb_version: v1.4.5
-      ci_tools_version: v1.4
+      ci_tools_version: v1.4.5
       # Native desktop platforms only (Windows/Linux/macOS); no WebAssembly.
       exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
 
@@ -47,7 +47,7 @@ jobs:
     with:
       extension_name: oracle
       duckdb_version: v1.5.5
-      ci_tools_version: v1.5
+      ci_tools_version: v1.5.5
       exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
 
   # ---- Collect, attest, and publish ----------------------------------------
