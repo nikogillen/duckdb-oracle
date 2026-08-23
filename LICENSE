@@ -1,5 +1,7 @@
 Copyright 2026 Rinie Kervel
-Most code converted by Claude Code from duckdv-postgres that has this license.
+Most code converted by Claude Code from duckdb-postgres, which uses this license.
+Third-party components bundled in the compiled binaries are listed in
+THIRD_PARTY_LICENSES.
 
 Copyright 2018-2025 Stichting DuckDB Foundation
 

@@ -22,7 +22,7 @@ SELECT * FROM ora.hr.employees LIMIT 10;
 - [Installation](#installation) · [Authentication](#authentication)
 - [**Working with Oracle in DuckDB**](#working-with-oracle-in-duckdb) · [Examples](#more-examples)
 - [Data types](#data-type-mapping) · [Options](#extension-options)
-- [Build from source](#building-from-source) · [Troubleshooting](#troubleshooting) · [How it works](#how-it-works) · [Security](#security)
+- [Build from source](#building-from-source) · [Troubleshooting](#troubleshooting) · [How it works](#how-it-works) · [Security](#security) · [Credits & license](#credits--license)
 
 ---
 
@@ -347,3 +347,14 @@ function calls, `64` full trace. The trace goes to stderr (`2>odpi.log`).
 
 Credentials, unsigned-extension verification and debug-logging notes are covered
 in [SECURITY.md](SECURITY.md). Report vulnerabilities privately (see that file).
+
+## Credits & license
+
+This extension is a port of [duckdb-postgres](https://github.com/duckdb/duckdb-postgres)
+to Oracle and builds against [DuckDB](https://github.com/duckdb/duckdb) — both MIT
+licensed (© Stichting DuckDB Foundation). Oracle connectivity uses
+[ODPI-C](https://oracle.github.io/odpi/) (© Oracle, UPL 1.0 / Apache 2.0).
+
+This project is released under the MIT License — see [LICENSE](LICENSE). The
+license texts of bundled third-party code (ODPI-C, DuckDB) are in
+[THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES) and ship with every release.
