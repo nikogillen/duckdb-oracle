@@ -51,8 +51,10 @@ public:
 			dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);
 			throw IOException("Oracle prepare failed: %s", string(error_info.message));
 		}
-		// Set fetch array size for bulk fetching
+		// Set fetch array size for bulk fetching, and match the server-side prefetch
+		// window to it so a full-table scan minimises client/server round-trips.
 		dpiStmt_setFetchArraySize(stmt, FETCH_ARRAY_SIZE);
+		dpiStmt_setPrefetchRows(stmt, FETCH_ARRAY_SIZE);
 
 		if (dpiStmt_execute(stmt, DPI_MODE_EXEC_DEFAULT, &num_cols) < 0) {
 			dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);

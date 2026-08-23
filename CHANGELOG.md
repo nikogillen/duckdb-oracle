@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Features
+
+- Map Oracle 23ai **VECTOR** columns to DuckDB `LIST(FLOAT)` (FLOAT32/FLOAT64/INT8
+  formats), usable with array/VSS operations.
+- Map Oracle native **JSON** columns to DuckDB `JSON` (recursive serialization),
+  so DuckDB's JSON functions work directly on Oracle JSON.
+
+### Fixes
+
+- Fix scanner crash when querying a table created via the extension in the same
+  session (empty `oracle_types`); the entry is now reloaded from the data dictionary.
+- Fix CLOB/NCLOB (VARCHAR) and BLOB columns reading back empty; LOB handles are now
+  read via `dpiLob_getSize`/`dpiLob_readBytes`.
+
+### Performance & operations
+
+- Replace the per-pool-return `SELECT 1 FROM DUAL` health check with the
+  client-side `dpiConn_getIsHealthy` (saves a network round-trip per pooled query).
+- Set server-side prefetch to match the fetch array size for smoother scans.
+- Tag Oracle sessions with a client identifier/module (visible in `V$SESSION`).
+
 ### Dependencies
 
 - ODPI-C is no longer vendored in the repo. It is now fetched at build time by

@@ -76,6 +76,86 @@ static string OracleReadBlob(dpiLob *lob) {
 	return result;
 }
 
+// Append a JSON-escaped string literal (with surrounding quotes) to out.
+static void OracleJsonEscape(const char *s, uint32_t len, string &out) {
+	out += '"';
+	for (uint32_t i = 0; i < len; i++) {
+		unsigned char c = (unsigned char)s[i];
+		switch (c) {
+		case '"': out += "\\\""; break;
+		case '\\': out += "\\\\"; break;
+		case '\n': out += "\\n"; break;
+		case '\r': out += "\\r"; break;
+		case '\t': out += "\\t"; break;
+		default:
+			if (c < 0x20) {
+				char buf[8];
+				snprintf(buf, sizeof(buf), "\\u%04x", c);
+				out += buf;
+			} else {
+				out += (char)c;
+			}
+		}
+	}
+	out += '"';
+}
+
+// Recursively serialize an ODPI-C JSON node to compact JSON text.
+static void OracleSerializeJsonNode(const dpiJsonNode *node, string &out) {
+	if (!node || !node->value) {
+		out += "null";
+		return;
+	}
+	switch (node->nativeTypeNum) {
+	case DPI_NATIVE_TYPE_JSON_OBJECT: {
+		const dpiJsonObject &obj = node->value->asJsonObject;
+		out += '{';
+		for (uint32_t i = 0; i < obj.numFields; i++) {
+			if (i) out += ',';
+			OracleJsonEscape(obj.fieldNames[i], obj.fieldNameLengths[i], out);
+			out += ':';
+			OracleSerializeJsonNode(&obj.fields[i], out);
+		}
+		out += '}';
+		break;
+	}
+	case DPI_NATIVE_TYPE_JSON_ARRAY: {
+		const dpiJsonArray &arr = node->value->asJsonArray;
+		out += '[';
+		for (uint32_t i = 0; i < arr.numElements; i++) {
+			if (i) out += ',';
+			OracleSerializeJsonNode(&arr.elements[i], out);
+		}
+		out += ']';
+		break;
+	}
+	case DPI_NATIVE_TYPE_BYTES:
+		// Numbers are requested as strings (see DPI_JSON_OPT_NUMBER_AS_STRING) and
+		// emitted unquoted; everything else is a JSON string.
+		if (node->oracleTypeNum == DPI_ORACLE_TYPE_NUMBER) {
+			out.append(node->value->asBytes.ptr, node->value->asBytes.length);
+		} else {
+			OracleJsonEscape(node->value->asBytes.ptr, node->value->asBytes.length, out);
+		}
+		break;
+	case DPI_NATIVE_TYPE_INT64:
+		out += to_string(node->value->asInt64);
+		break;
+	case DPI_NATIVE_TYPE_DOUBLE: {
+		char buf[32];
+		snprintf(buf, sizeof(buf), "%.17g", node->value->asDouble);
+		out += buf;
+		break;
+	}
+	case DPI_NATIVE_TYPE_BOOLEAN:
+		out += node->value->asBoolean ? "true" : "false";
+		break;
+	default:
+		out += "null";
+		break;
+	}
+}
+
 void OracleConvertValue(Vector &col, idx_t out_row,
                          dpiData *data, dpiNativeTypeNum native_type,
                          const LogicalType &target_type,
@@ -234,9 +314,47 @@ void OracleConvertValue(Vector &col, idx_t out_row,
 			// whole value into memory. dpiLob_getSize returns the length in characters
 			// for character LOBs; UTF-8 needs up to 4 bytes per character.
 			str_val = OracleReadClob(data->value.asLOB);
+		} else if (native_type == DPI_NATIVE_TYPE_JSON) {
+			// Oracle native JSON → serialize to compact JSON text (target is DuckDB JSON,
+			// which is VARCHAR under the hood). Numbers as strings to preserve precision.
+			dpiJsonNode *node = nullptr;
+			if (dpiJson_getValue(data->value.asJson, DPI_JSON_OPT_NUMBER_AS_STRING,
+			                     &node) == 0) {
+				OracleSerializeJsonNode(node, str_val);
+			}
 		}
 		FlatVector::GetData<string_t>(col)[out_row] =
 		    StringVector::AddString(col, str_val);
+		break;
+	}
+	case LogicalTypeId::LIST: {
+		// Oracle 23ai VECTOR → LIST(FLOAT).
+		if (native_type == DPI_NATIVE_TYPE_VECTOR) {
+			dpiVectorInfo info;
+			if (dpiVector_getValue(data->value.asVector, &info) == 0 && !info.isSparse) {
+				idx_t start = ListVector::GetListSize(col);
+				ListVector::Reserve(col, start + info.numDimensions);
+				auto child_data = FlatVector::GetData<float>(ListVector::GetEntry(col));
+				for (uint32_t i = 0; i < info.numDimensions; i++) {
+					float v = 0.0f;
+					switch (info.format) {
+					case DPI_VECTOR_FORMAT_FLOAT32: v = info.dimensions.asFloat[i]; break;
+					case DPI_VECTOR_FORMAT_FLOAT64: v = (float)info.dimensions.asDouble[i]; break;
+					case DPI_VECTOR_FORMAT_INT8: v = (float)info.dimensions.asInt8[i]; break;
+					default: v = 0.0f; break; // BINARY unsupported → zeros
+					}
+					child_data[start + i] = v;
+				}
+				ListVector::SetListSize(col, start + info.numDimensions);
+				auto list_entries = FlatVector::GetData<list_entry_t>(col);
+				list_entries[out_row].offset = start;
+				list_entries[out_row].length = info.numDimensions;
+			} else {
+				FlatVector::SetNull(col, out_row, true);
+			}
+		} else {
+			FlatVector::SetNull(col, out_row, true);
+		}
 		break;
 	}
 	case LogicalTypeId::BLOB: {

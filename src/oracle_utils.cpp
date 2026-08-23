@@ -120,6 +120,13 @@ dpiConn *OracleUtils::OraConnect(const string &dsn, const string &attach_path) {
 		throw IOException("Unable to connect to Oracle at \"%s\": %.*s", safe_target,
 		                  (int)error_info.messageLength, error_info.message);
 	}
+
+	// Best-effort session tagging so DBAs can identify the extension in V$SESSION
+	// (CLIENT_IDENTIFIER / MODULE). Failures here are non-fatal.
+	static const char kClientId[] = "duckdb_oracle";
+	static const char kModule[] = "duckdb-oracle";
+	dpiConn_setClientIdentifier(conn, kClientId, (uint32_t)(sizeof(kClientId) - 1));
+	dpiConn_setModule(conn, kModule, (uint32_t)(sizeof(kModule) - 1));
 	return conn;
 }
 
@@ -234,6 +241,14 @@ LogicalType OracleUtils::TypeToLogicalType(const OracleTypeData &type_info,
 	} else if (base_type == "BOOLEAN") {
 		// Oracle 23c+ BOOLEAN; older Oracle lacks this
 		return LogicalType::BOOLEAN;
+	} else if (base_type == "JSON") {
+		// Oracle 21c+ native JSON → DuckDB JSON
+		oracle_type.info = OracleTypeAnnotation::JSON_AS_JSON;
+		return LogicalType::JSON();
+	} else if (base_type == "VECTOR" || StringUtil::StartsWith(base_type, "VECTOR")) {
+		// Oracle 23ai VECTOR → LIST(FLOAT); fetched via dpiVector
+		oracle_type.info = OracleTypeAnnotation::VECTOR_AS_LIST;
+		return LogicalType::LIST(LogicalType::FLOAT);
 	} else {
 		// Unknown/unsupported type - cast to VARCHAR
 		oracle_type.info = OracleTypeAnnotation::CAST_TO_VARCHAR;
