@@ -1,0 +1,138 @@
+name: CI Linux + Oracle integration
+
+# Baut die Extension auf einem flüchtigen, GitHub-gehosteten Linux-Runner und fährt
+# echte Integrationstests gegen eine wegwerfbare Oracle-Free-Datenbank (Service-Container).
+#
+# Dieser Job DARF auf `pull_request` laufen (auch von Forks), weil GitHub-gehostete
+# Runner nach jedem Job verworfen werden — im Gegensatz zum self-hosted macOS-Runner.
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DUCKDB_VERSION: v1.5.5
+
+jobs:
+  build-and-test:
+    name: Linux amd64 + Oracle Free
+    runs-on: ubuntu-24.04
+
+    # Wegwerf-Zugangsdaten für den CI-internen Container. KEINE echten Secrets:
+    # die DB existiert nur für die Dauer dieses Jobs und ist nicht erreichbar.
+    services:
+      oracle:
+        image: gvenzl/oracle-free:slim
+        env:
+          ORACLE_PASSWORD: ci_syspw
+          APP_USER: demo
+          APP_USER_PASSWORD: ci_demopw
+        ports:
+          - 1521:1521
+        options: >-
+          --health-cmd "healthcheck.sh"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 40
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y git ninja-build cmake g++ python3 curl unzip libaio1t64
+
+      - name: Install Oracle Instant Client (Basic Light)
+        run: |
+          set -euo pipefail
+          # Ubuntu 24.04 ships libaio as libaio.so.1t64 (64-bit time_t transition),
+          # but the Instant Client is linked against the old SONAME libaio.so.1.
+          if [ ! -e /usr/lib/x86_64-linux-gnu/libaio.so.1 ]; then
+            src="$(find /usr/lib/x86_64-linux-gnu -name 'libaio.so.1*' | head -1)"
+            test -n "$src" && sudo ln -sf "$src" /usr/lib/x86_64-linux-gnu/libaio.so.1
+          fi
+          mkdir -p "$HOME/instantclient"
+          cd "$HOME/instantclient"
+          curl -fsSLO https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
+          unzip -q instantclient-basiclite-linuxx64.zip
+          # The zip extracts into a versioned subdir (instantclient_XX_Y); -mindepth 1
+          # avoids matching the parent dir itself, which also matches 'instantclient*'.
+          IC_DIR="$(find "$HOME/instantclient" -mindepth 1 -maxdepth 1 -type d -name 'instantclient*' | head -1)"
+          test -f "$IC_DIR/libclntsh.so" || { echo "libclntsh.so not found in $IC_DIR" >&2; ls -la "$IC_DIR" >&2; exit 1; }
+          echo "IC_DIR=$IC_DIR" >> "$GITHUB_ENV"
+
+      - name: Checkout DuckDB ${{ env.DUCKDB_VERSION }}
+        uses: actions/checkout@v4
+        with:
+          repository: duckdb/duckdb
+          ref: ${{ env.DUCKDB_VERSION }}
+          path: duckdb
+          fetch-depth: 0
+
+      - name: Checkout extension-ci-tools
+        uses: actions/checkout@v4
+        with:
+          repository: duckdb/extension-ci-tools
+          path: duckdb/extension-ci-tools
+          fetch-depth: 1
+
+      - name: Build (release, linux_amd64)
+        working-directory: duckdb
+        env:
+          GEN: ninja
+          DUCKDB_PLATFORM: linux_amd64
+          EXTENSION_CONFIGS: ${{ github.workspace }}/extension_config.cmake
+        run: make release
+
+      - name: Wait for Oracle to become ready
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if docker logs "${{ job.services.oracle.id }}" 2>&1 | grep -q "DATABASE IS READY TO USE"; then
+              echo "Oracle is ready"; exit 0
+            fi
+            sleep 5
+          done
+          echo "Oracle did not become ready in time" >&2; exit 1
+
+      - name: Seed test data
+        run: |
+          set -euo pipefail
+          # The gvenzl image ships sqlplus; run the seed script inside the service container.
+          docker exec -i "${{ job.services.oracle.id }}" \
+            sqlplus -S demo/ci_demopw@localhost:1521/FREEPDB1 \
+            < "${GITHUB_WORKSPACE}/test/sql/setup_oracle.sql"
+
+      - name: Run integration tests
+        working-directory: duckdb
+        env:
+          LD_LIBRARY_PATH: ${{ env.IC_DIR }}
+          # EZConnect gegen die Free-PDB. Wegwerf-Zugangsdaten (siehe services.oracle).
+          ORA_DSN: demo/ci_demopw@127.0.0.1:1521/FREEPDB1
+        run: |
+          set -euo pipefail
+          EXT="$(pwd)/build/release/repository/${DUCKDB_VERSION}/linux_amd64/oracle.duckdb_extension"
+          {
+            echo "LOAD '${EXT}';"
+            echo "ATTACH '${ORA_DSN}' AS ora (TYPE oracle);"
+            cat "${GITHUB_WORKSPACE}/test/sql/integration.sql"
+          } | ./build/release/duckdb -unsigned
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-linux_amd64
+          path: duckdb/build/release/repository/${{ env.DUCKDB_VERSION }}/linux_amd64/oracle.duckdb_extension
+          if-no-files-found: warn

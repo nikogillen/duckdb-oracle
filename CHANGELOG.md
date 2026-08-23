@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Security
+
+- Fix SQL injection through unquoted Oracle identifiers: `QuoteIdentifier` now
+  quotes and escapes identifiers (reproducing Oracle's unquoted up-casing, so the
+  same standard objects still resolve).
+- Escape filter-pushdown literals in the default branch instead of concatenating a
+  raw `ToString()`.
+- Redact the password from Oracle connection error messages.
+- Enable OCI threaded mode (`DPI_MODE_CREATE_THREADED`) for pooled connections.
+- Read ODPI-C error messages using `messageLength` (avoid C-string over-read).
+
+### Fixes
+
+- Fix connection-pool slot leak when opening a new connection fails.
+- Fix macOS/libc++ build error: `OracleTransaction` incomplete type in
+  `OracleTransactionManager`'s destructor.
+
+### Build & CI
+
+- Add native macOS arm64 build workflow (self-hosted runner) and a Linux + Oracle
+  Free integration workflow (GitHub-hosted).
+- Add end-to-end integration tests against Oracle Free (`test/`).
+
 ## v1.5.5 (2026-07-24) — DuckDB 1.5.5
 
 Bump to DuckDB **v1.5.5**.

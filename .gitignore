@@ -1,2 +1,21 @@
 .claude/
 build/
+.DS_Store
+
+# DuckDB build tree (cloned locally for compilation, never committed)
+duckdb/
+
+# Local Oracle client / credentials — must never enter this public repo
+.env*
+*.ora
+sqlnet.ora
+tnsnames.ora
+wallet*/
+cwallet.sso
+ewallet.p12*
+*.pem
+*.key
+*.p12
+*.jks
+instantclient*/
+*.dmg

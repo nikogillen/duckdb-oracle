@@ -57,9 +57,18 @@ OraclePoolConnection OracleConnectionPool::GetConnectionInternal(unique_lock<mut
 	}
 	// Open a new connection (outside the lock)
 	lock.unlock();
-	return OraclePoolConnection(
-	    this,
-	    OracleConnection::Open(catalog.connection_string, catalog.attach_path));
+	try {
+		return OraclePoolConnection(
+		    this,
+		    OracleConnection::Open(catalog.connection_string, catalog.attach_path));
+	} catch (...) {
+		// Open() failed before an OraclePoolConnection took ownership, so no destructor
+		// will release the slot we reserved above. Roll back the count to avoid leaking
+		// pool capacity on every failed connect (which would otherwise DoS the ATTACH).
+		lock_guard<mutex> relock(connection_lock);
+		active_connections--;
+		throw;
+	}
 }
 
 OraclePoolConnection OracleConnectionPool::ForceGetConnection() {

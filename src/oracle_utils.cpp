@@ -22,10 +22,19 @@ dpiContext *OracleUtils::GetOrCreateContext() {
 	memset(&params, 0, sizeof(params));
 	if (dpiContext_createWithParams(DPI_MAJOR_VERSION, DPI_MINOR_VERSION, &params,
 	                                &g_dpi_context, &error_info) < 0) {
-		throw IOException("Failed to create ODPI-C context: %s (fn=%s)",
-		                  error_info.message, error_info.fnName);
+		throw IOException("Failed to create ODPI-C context: %.*s (fn=%s)",
+		                  (int)error_info.messageLength, error_info.message,
+		                  error_info.fnName);
 	}
 	return g_dpi_context;
+}
+
+// Build a display string that never contains the password, for use in error messages.
+static string RedactTarget(const string &user, const string &connect_string) {
+	if (!connect_string.empty()) {
+		return user.empty() ? connect_string : user + "@" + connect_string;
+	}
+	return user.empty() ? "<oracle>" : user;
 }
 
 void OracleUtils::ParseDSN(const string &dsn, string &user, string &password,
@@ -87,16 +96,29 @@ dpiConn *OracleUtils::OraConnect(const string &dsn, const string &attach_path) {
 	dpiConn *conn = nullptr;
 	dpiErrorInfo error_info;
 
+	// Enable OCI threaded mode: the extension shares connections across DuckDB scan
+	// threads via the connection pool, which is unsafe without DPI_MODE_CREATE_THREADED.
+	dpiCommonCreateParams common_params;
+	if (dpiContext_initCommonCreateParams(context, &common_params) < 0) {
+		dpiContext_getError(context, &error_info);
+		throw IOException("Failed to init Oracle common params: %.*s",
+		                  (int)error_info.messageLength, error_info.message);
+	}
+	common_params.createMode |= DPI_MODE_CREATE_THREADED;
+
 	dpiConnCreateParams conn_params;
 	dpiContext_initConnCreateParams(context, &conn_params);
 
 	if (dpiConn_create(context, user.c_str(), (uint32_t)user.size(), password.c_str(),
 	                   (uint32_t)password.size(), connect_string.c_str(),
-	                   (uint32_t)connect_string.size(), nullptr, &conn_params,
+	                   (uint32_t)connect_string.size(), &common_params, &conn_params,
 	                   &conn) < 0) {
 		dpiContext_getError(context, &error_info);
-		throw IOException("Unable to connect to Oracle at \"%s\": %s", attach_path,
-		                  string(error_info.message));
+		// Never expose the password in error messages: build a redacted target string
+		// from the parsed components (attach_path may itself contain the full DSN).
+		string safe_target = RedactTarget(user, connect_string);
+		throw IOException("Unable to connect to Oracle at \"%s\": %.*s", safe_target,
+		                  (int)error_info.messageLength, error_info.message);
 	}
 	return conn;
 }
@@ -311,9 +333,32 @@ LogicalType OracleUtils::ToOracleType(const LogicalType &input) {
 }
 
 string OracleUtils::QuoteIdentifier(const string &text) {
-	// Never quote Oracle identifiers — Oracle uppercases unquoted identifiers,
-	// which matches how names are stored in the data dictionary.
-	return text;
+	// The catalog stores every identifier folded to lower case (the load queries use
+	// LOWER(owner/table_name/column_name)). Historically the generated SQL left names
+	// unquoted and relied on Oracle up-casing unquoted identifiers to match the actual
+	// (upper-case) dictionary entries — but that left the door open to SQL injection
+	// through maliciously named objects.
+	//
+	// We reproduce Oracle's unquoted-identifier normalization by upper-casing the name,
+	// then wrap it in double quotes and escape any embedded double quote by doubling it.
+	// This targets exactly the same objects as before (standard upper-case Oracle
+	// schemas/tables/columns) while making injection impossible: a crafted name can only
+	// ever become a single quoted identifier, never break out into surrounding SQL.
+	//
+	// Known limitation (pre-existing): case-sensitive objects created with quoted
+	// lower/mixed-case names are not addressable — matching the extension's prior
+	// behaviour. Preserving original dictionary case end-to-end is tracked separately.
+	auto upper = StringUtil::Upper(text);
+	string result = "\"";
+	for (char c : upper) {
+		if (c == '"') {
+			result += "\"\"";
+		} else {
+			result += c;
+		}
+	}
+	result += "\"";
+	return result;
 }
 
 string OracleUtils::WriteLiteral(const string &value) {

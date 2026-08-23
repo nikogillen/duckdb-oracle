@@ -10,6 +10,8 @@ OracleTransactionManager::OracleTransactionManager(AttachedDatabase &db_p,
     : TransactionManager(db_p), oracle_catalog(oracle_catalog) {
 }
 
+OracleTransactionManager::~OracleTransactionManager() = default;
+
 Transaction &OracleTransactionManager::StartTransaction(ClientContext &context) {
 	auto transaction = make_uniq<OracleTransaction>(oracle_catalog, *this, context);
 	transaction->Start();
