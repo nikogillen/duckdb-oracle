@@ -25,6 +25,15 @@
   Free integration workflow (GitHub-hosted).
 - Add end-to-end integration tests against Oracle Free (`test/`).
 
+### Distribution
+
+- Stop committing pre-built extension binaries to the repo (removed `extensions/`).
+- Add a release pipeline (`.github/workflows/release.yml`) that builds the
+  extension for Windows, Linux and macOS against DuckDB **1.4 LTS** and **1.5.x**
+  via DuckDB's official reusable distribution workflow, then publishes the binaries
+  as GitHub Release assets with a `SHA256SUMS` file and build-provenance
+  attestations. README updated with install + verification instructions.
+
 ## v1.5.5 (2026-07-24) — DuckDB 1.5.5
 
 Bump to DuckDB **v1.5.5**.
