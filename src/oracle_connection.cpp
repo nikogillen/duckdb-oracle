@@ -295,16 +295,14 @@ bool OracleConnection::IsConnectionOk() {
 	if (!connection || !connection->connection) {
 		return false;
 	}
-	// Try a cheap round-trip to verify the connection
-	dpiStmt *stmt = nullptr;
-	if (dpiConn_prepareStmt(connection->connection, 0, "SELECT 1 FROM DUAL", 18,
-	                         nullptr, 0, &stmt) < 0) {
+	// Client-side health check: no server round-trip, unlike the previous
+	// "SELECT 1 FROM DUAL". Called on every pool return, so this saves a full
+	// network round-trip per pooled query.
+	int is_healthy = 0;
+	if (dpiConn_getIsHealthy(connection->connection, &is_healthy) < 0) {
 		return false;
 	}
-	uint32_t num_cols = 0;
-	bool ok = (dpiStmt_execute(stmt, DPI_MODE_EXEC_DEFAULT, &num_cols) >= 0);
-	dpiStmt_release(stmt);
-	return ok;
+	return is_healthy != 0;
 }
 
 bool OracleConnection::IsOpen() {

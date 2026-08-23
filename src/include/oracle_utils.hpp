@@ -30,6 +30,8 @@ enum class OracleTypeAnnotation {
 	CLOB_AS_VARCHAR,       // CLOB/NCLOB read as VARCHAR
 	TIMESTAMP_WITH_TZ,     // TIMESTAMP WITH TIME ZONE
 	TIMESTAMP_WITH_LTZ,    // TIMESTAMP WITH LOCAL TIME ZONE
+	VECTOR_AS_LIST,        // Oracle 23ai VECTOR → LIST(FLOAT)
+	JSON_AS_JSON,          // Oracle native JSON → DuckDB JSON
 };
 
 struct OracleType {
