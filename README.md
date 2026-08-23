@@ -3,11 +3,26 @@
 Query, join and modify **Oracle** databases directly from **DuckDB** — like
 `duckdb-postgres`, but for Oracle (via [ODPI-C](https://oracle.github.io/odpi/)).
 
+[![Latest release](https://img.shields.io/github/v/release/nikogillen/duckdb-oracle?sort=semver)](../../releases)
+[![DuckDB](https://img.shields.io/badge/DuckDB-1.4%20LTS%20%7C%201.5.x-yellow)](https://duckdb.org)
+[![License](https://img.shields.io/github/license/nikogillen/duckdb-oracle)](LICENSE)
+
 ```sql
 LOAD oracle;
 ATTACH 'user/password@host:1521/service' AS ora (TYPE oracle);
 SELECT * FROM ora.hr.employees LIMIT 10;
 ```
+
+---
+
+## Contents
+
+- [Features](#features) · [Limitations](#not-supported--limitations)
+- [Prerequisites](#prerequisites) · [Instant Client setup](#set-up-the-oracle-instant-client) · [Compatibility](#compatibility-matrix)
+- [Installation](#installation) · [Authentication](#authentication)
+- [**Working with Oracle in DuckDB**](#working-with-oracle-in-duckdb) · [Examples](#more-examples)
+- [Data types](#data-type-mapping) · [Options](#extension-options)
+- [Build from source](#building-from-source) · [Troubleshooting](#troubleshooting) · [How it works](#how-it-works) · [Security](#security)
 
 ---
 
@@ -163,29 +178,99 @@ user/password@MYDB                       -- TNS alias (tnsnames.ora / ORACLE_HOM
 user/password@//host:1521/service?connect_timeout=10
 ```
 
-## Examples
+## Working with Oracle in DuckDB
+
+A typical session, start to finish.
+
+**1. Start DuckDB and load the extension**
+
+```bash
+duckdb -unsigned
+```
+```sql
+LOAD '/path/to/oracle.duckdb_extension';
+```
+
+**2. Attach the database** (whole DB, or a single schema)
 
 ```sql
 ATTACH '' AS ora (TYPE oracle, SECRET ora);
--- Attach only one schema:  ATTACH '' AS ora (TYPE oracle, SECRET ora, SCHEMA 'HR');
+-- just one schema:
+ATTACH '' AS ora (TYPE oracle, SECRET ora, SCHEMA 'HR');
+```
 
--- Read + filter (pushed down to Oracle)
-SELECT employee_id, last_name FROM ora.hr.employees WHERE department_id = 10;
+**3. Explore it** like any DuckDB catalog
 
--- Join local DuckDB data against Oracle
-SELECT e.last_name, b.bonus
+```sql
+SHOW ALL TABLES;                       -- everything visible under `ora`
+DESCRIBE ora.hr.employees;             -- columns and types
+SELECT * FROM ora.hr.employees LIMIT 10;
+```
+
+**4. Query** — filters and projections are pushed down to Oracle
+
+```sql
+SELECT department_id, count(*), avg(salary)
+FROM ora.hr.employees
+WHERE hire_date >= DATE '2020-01-01'
+GROUP BY department_id;
+```
+
+**5. Combine Oracle with local files** (CSV, Parquet, other databases)
+
+```sql
+-- enrich an Oracle table with a local Parquet file
+SELECT e.employee_id, e.last_name, r.rating
 FROM ora.hr.employees e
-JOIN local_bonus b ON b.employee_id = e.employee_id;
+JOIN read_parquet('reviews.parquet') r USING (employee_id);
+```
 
--- Write back (UPDATE/DELETE use ROWID under the hood)
+**6. Move data in or out** (ETL)
+
+```sql
+-- Oracle → local DuckDB table (fast local copy for analytics)
+CREATE TABLE emp_local AS SELECT * FROM ora.hr.employees;
+
+-- Oracle → Parquet on disk
+COPY (SELECT * FROM ora.hr.employees) TO 'employees.parquet' (FORMAT parquet);
+
+-- local/other data → Oracle
+INSERT INTO ora.hr.employees SELECT * FROM emp_local WHERE employee_id > 1000;
+```
+
+**7. Modify Oracle data** (write-back uses `ROWID`)
+
+```sql
 UPDATE ora.hr.employees SET salary = salary * 1.1 WHERE department_id = 10;
 DELETE FROM ora.hr.employees WHERE employee_id = 100;
+```
 
--- Oracle 23ai JSON → DuckDB JSON functions work directly
-SELECT json_extract_string(doc, '$.name') AS name FROM ora.app.documents;
+**8. Detach when done**
+
+```sql
+DETACH ora;
+```
+
+## More examples
+
+```sql
+-- Cross-database join (DuckDB-local table ⋈ Oracle table)
+SELECT e.last_name, b.bonus
+FROM ora.hr.employees e
+JOIN bonuses b ON b.employee_id = e.employee_id;
+
+-- Create a table and an index in Oracle from DuckDB
+CREATE TABLE ora.hr.audit (id INTEGER, note VARCHAR, at TIMESTAMP);
+CREATE INDEX audit_at ON ora.hr.audit (at);
+
+-- Oracle 23ai JSON → DuckDB JSON (DuckDB's JSON functions work directly)
+SELECT json_extract_string(doc, '$.name') AS name
+FROM ora.app.documents
+WHERE json_extract_string(doc, '$.active') = 'true';
 
 -- Oracle 23ai VECTOR → LIST(FLOAT)
-SELECT id, embedding[1] AS first_dim, len(embedding) AS dims FROM ora.app.items;
+SELECT id, len(embedding) AS dims, embedding[1] AS first_dim
+FROM ora.app.items;
 ```
 
 ## Data type mapping
