@@ -2,8 +2,6 @@
 build/
 .DS_Store
 
-# DuckDB build tree (cloned locally for compilation, never committed)
-duckdb/
 
 # Local Oracle client / credentials — must never enter this public repo
 .env*
