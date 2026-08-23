@@ -56,6 +56,12 @@ jobs:
       - name: Install Oracle Instant Client (Basic Light)
         run: |
           set -euo pipefail
+          # Ubuntu 24.04 ships libaio as libaio.so.1t64 (64-bit time_t transition),
+          # but the Instant Client is linked against the old SONAME libaio.so.1.
+          if [ ! -e /usr/lib/x86_64-linux-gnu/libaio.so.1 ]; then
+            src="$(find /usr/lib/x86_64-linux-gnu -name 'libaio.so.1*' | head -1)"
+            test -n "$src" && sudo ln -sf "$src" /usr/lib/x86_64-linux-gnu/libaio.so.1
+          fi
           mkdir -p "$HOME/instantclient"
           cd "$HOME/instantclient"
           curl -fsSLO https://download.oracle.com/otn_software/linux/instantclient/instantclient-basiclite-linuxx64.zip
