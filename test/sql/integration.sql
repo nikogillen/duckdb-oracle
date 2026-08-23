@@ -42,4 +42,15 @@ FROM ora.demo.t_emp e
 JOIN local_bonus b ON e.id = b.id
 ORDER BY e.id;
 
+-- Regression: create a table via the extension and query it in the SAME session.
+-- Previously this crashed the scanner (empty oracle_types) and VARCHAR columns
+-- (mapped to Oracle CLOB) read back empty.
+DROP TABLE IF EXISTS ora.demo.dck_roundtrip;
+CREATE TABLE ora.demo.dck_roundtrip (id INTEGER, note VARCHAR);
+INSERT INTO ora.demo.dck_roundtrip VALUES (1, 'clob text via create'), (2, 'second');
+-- Must return the actual text (not empty) and not crash.
+SELECT id, note FROM ora.demo.dck_roundtrip ORDER BY id;
+SELECT count(*) AS clob_nonempty FROM ora.demo.dck_roundtrip WHERE note = 'clob text via create';
+DROP TABLE ora.demo.dck_roundtrip;
+
 SELECT 'ALL INTEGRATION TESTS PASSED' AS result;
