@@ -36,6 +36,46 @@ static timestamp_tz_t OdpiTimestampTZToTimestampTZ(const dpiTimestamp &ts) {
 	return timestamp_tz_t(Timestamp::GetEpochMicroSeconds(utc_ts));
 }
 
+// Read a character LOB (CLOB/NCLOB) fully into a string.
+static string OracleReadClob(dpiLob *lob) {
+	if (!lob) {
+		return string();
+	}
+	uint64_t char_size = 0;
+	if (dpiLob_getSize(lob, &char_size) < 0 || char_size == 0) {
+		return string();
+	}
+	// getSize is in characters for character LOBs; allow up to 4 bytes/char (UTF-8).
+	uint64_t buf_len = char_size * 4;
+	string result;
+	result.resize(buf_len);
+	uint64_t read_len = buf_len;
+	if (dpiLob_readBytes(lob, 1, char_size, &result[0], &read_len) < 0) {
+		return string();
+	}
+	result.resize(read_len);
+	return result;
+}
+
+// Read a binary LOB (BLOB) fully into a string buffer.
+static string OracleReadBlob(dpiLob *lob) {
+	if (!lob) {
+		return string();
+	}
+	uint64_t byte_size = 0;
+	if (dpiLob_getSize(lob, &byte_size) < 0 || byte_size == 0) {
+		return string();
+	}
+	string result;
+	result.resize(byte_size);
+	uint64_t read_len = byte_size;
+	if (dpiLob_readBytes(lob, 1, byte_size, &result[0], &read_len) < 0) {
+		return string();
+	}
+	result.resize(read_len);
+	return result;
+}
+
 void OracleConvertValue(Vector &col, idx_t out_row,
                          dpiData *data, dpiNativeTypeNum native_type,
                          const LogicalType &target_type,
@@ -189,6 +229,11 @@ void OracleConvertValue(Vector &col, idx_t out_row,
 			char buf[32];
 			snprintf(buf, sizeof(buf), "%d-%d", ivl.years, ivl.months);
 			str_val = buf;
+		} else if (native_type == DPI_NATIVE_TYPE_LOB) {
+			// CLOB/NCLOB come back as a LOB handle under the default fetch. Read the
+			// whole value into memory. dpiLob_getSize returns the length in characters
+			// for character LOBs; UTF-8 needs up to 4 bytes per character.
+			str_val = OracleReadClob(data->value.asLOB);
 		}
 		FlatVector::GetData<string_t>(col)[out_row] =
 		    StringVector::AddString(col, str_val);
@@ -198,6 +243,9 @@ void OracleConvertValue(Vector &col, idx_t out_row,
 		string blob_val;
 		if (native_type == DPI_NATIVE_TYPE_BYTES) {
 			blob_val = string(data->value.asBytes.ptr, data->value.asBytes.length);
+		} else if (native_type == DPI_NATIVE_TYPE_LOB) {
+			// BLOB comes back as a LOB handle; dpiLob_getSize returns bytes here.
+			blob_val = OracleReadBlob(data->value.asLOB);
 		}
 		FlatVector::GetData<string_t>(col)[out_row] =
 		    StringVector::AddStringOrBlob(col, blob_val);
