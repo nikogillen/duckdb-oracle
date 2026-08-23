@@ -44,6 +44,67 @@ SELECT * FROM ora.hr.employees LIMIT 10;
 | **Oracle Instant Client** | **19c or newer** (Basic or Basic Light), on `PATH` / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` |
 | **Oracle server** | Any supported version for core features; **21c/23ai** for `JSON`, **23ai** for `VECTOR`/`BOOLEAN` |
 
+## Set up the Oracle Instant Client
+
+The extension loads Oracle's client library (`libclntsh` / `oci.dll`) at runtime,
+so it must be on your library search path **before** you start DuckDB. Download
+**Basic** or **Basic Light** for your OS and architecture from
+[Oracle Instant Client downloads](https://www.oracle.com/database/technologies/instant-client/downloads.html)
+(19c or newer), then follow the steps for your platform.
+
+<details open>
+<summary><b>Linux</b></summary>
+
+```bash
+# 1. unzip somewhere, e.g. /opt/oracle
+unzip instantclient-basiclite-linux.x64-*.zip -d /opt/oracle
+# 2. put it on the library path (this shell)
+export LD_LIBRARY_PATH=/opt/oracle/instantclient_23_9:$LD_LIBRARY_PATH
+# 3. libaio is required; on Ubuntu 24.04 also symlink the old soname:
+sudo apt-get install -y libaio1t64
+sudo ln -sf /usr/lib/x86_64-linux-gnu/libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1
+```
+
+For a permanent install, add the dir to `/etc/ld.so.conf.d/oracle.conf` and run
+`sudo ldconfig`. arm64 clients: use the `linux.arm64` package.
+</details>
+
+<details>
+<summary><b>macOS</b></summary>
+
+```bash
+# 1. unpack the DMG (use arm64 on Apple Silicon, x64 on Intel)
+hdiutil attach instantclient-basiclite-macos.arm64-*.dmg
+mkdir -p ~/lib && cp -R /Volumes/instantclient-*/ ~/lib/instantclient
+# 2. remove the Gatekeeper quarantine flag, or macOS blocks the .dylib files
+xattr -dr com.apple.quarantine ~/lib/instantclient
+# 3. put it on the library path (this shell)
+export DYLD_LIBRARY_PATH=~/lib/instantclient:$DYLD_LIBRARY_PATH
+```
+
+Tip: `~/lib` is a good spot because macOS strips `DYLD_*` variables for binaries
+in protected locations. Then start `duckdb -unsigned` from the same shell.
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+```bat
+:: 1. unzip somewhere, e.g. C:\oracle\instantclient_23_9
+:: 2. put it on PATH (this session)
+set PATH=C:\oracle\instantclient_23_9;%PATH%
+:: 3. start DuckDB from the same prompt
+duckdb.exe -unsigned
+```
+
+For a permanent install, add the directory to the system `PATH` (Environment
+Variables). The Instant Client also needs the **Microsoft Visual C++
+Redistributable** installed.
+</details>
+
+> The version folder name (`instantclient_23_9`, …) depends on the package you
+> downloaded — adjust the paths accordingly.
+
 ## Compatibility matrix
 
 Pre-built binaries are published for every combination below:
