@@ -57,7 +57,7 @@ SELECT * FROM ora.hr.employees LIMIT 10;
 |-------------|-------|
 | **DuckDB** | 1.4 LTS or 1.5.x (match the extension binary to your DuckDB version) |
 | **Oracle Instant Client** | **19c or newer** (Basic or Basic Light), on `PATH` / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` |
-| **Oracle server** | Any supported version for core features; **21c/23ai** for `JSON`, **23ai** for `VECTOR`/`BOOLEAN` |
+| **Oracle server** | **19c and later** for core features (older servers reachable by a 19c+ client work too); **21c+** adds `JSON`; **23ai** adds `VECTOR` / `BOOLEAN` |
 
 ## Set up the Oracle Instant Client
 
