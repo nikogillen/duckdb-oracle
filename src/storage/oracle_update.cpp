@@ -65,7 +65,7 @@ SinkFinalizeType OracleUpdate::Finalize(Pipeline &pipeline, Event &event,
 	return SinkFinalizeType::READY;
 }
 
-SourceResultType OracleUpdate::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+SourceResultType OracleUpdate::ORACLE_GET_DATA_METHOD(ExecutionContext &context, DataChunk &chunk,
                                                 OperatorSourceInput &input) const {
 	auto &gstate = sink_state->Cast<OracleUpdateGlobalState>();
 	chunk.SetCardinality(1);

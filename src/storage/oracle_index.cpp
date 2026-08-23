@@ -2,6 +2,7 @@
 #include "storage/oracle_catalog.hpp"
 #include "storage/oracle_transaction.hpp"
 #include "oracle_utils.hpp"
+#include "oracle_duckdb_compat.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
 #include "duckdb/planner/operator/logical_extension_operator.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
@@ -38,7 +39,7 @@ public:
 		return true;
 	}
 
-	SourceResultType GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+	SourceResultType ORACLE_GET_DATA_METHOD(ExecutionContext &context, DataChunk &chunk,
 	                                  OperatorSourceInput &input) const override {
 		auto &catalog = table.catalog;
 		auto &schema = table.schema;

@@ -19,21 +19,9 @@
 #include "duckdb/main/connection_manager.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "oracle_logging.hpp"
+#include "oracle_duckdb_compat.hpp"
 
-// DuckDB 1.5 registers storage/optimizer/callback extensions through
-// DBConfig::GetCallbackManager(); DuckDB 1.4 LTS uses the direct DBConfig members.
-// Detect which API is available via a header that only exists on 1.5+.
-#if defined(__has_include)
-#  if __has_include("duckdb/main/extension_callback_manager.hpp")
-#    define ORACLE_HAS_CALLBACK_MANAGER 1
-#  else
-#    define ORACLE_HAS_CALLBACK_MANAGER 0
-#  endif
-#else
-#  define ORACLE_HAS_CALLBACK_MANAGER 0
-#endif
-
-#if ORACLE_HAS_CALLBACK_MANAGER
+#if ORACLE_DUCKDB_15_PLUS
 #include "duckdb/main/extension_callback_manager.hpp"
 #endif
 
@@ -156,7 +144,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Storage extension
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
-#if ORACLE_HAS_CALLBACK_MANAGER
+#if ORACLE_DUCKDB_15_PLUS
 	config.GetCallbackManager().Register("oracle", make_shared_ptr<OracleStorageExtension>());
 #else
 	config.storage_extensions["oracle"] = make_uniq<OracleStorageExtension>();
@@ -183,14 +171,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Optimizer
 	OptimizerExtension oracle_optimizer;
 	oracle_optimizer.optimize_function = OracleOptimizer::Optimize;
-#if ORACLE_HAS_CALLBACK_MANAGER
+#if ORACLE_DUCKDB_15_PLUS
 	config.GetCallbackManager().Register(std::move(oracle_optimizer));
 #else
 	config.optimizer_extensions.push_back(std::move(oracle_optimizer));
 #endif
 
 	// Extension callback
-#if ORACLE_HAS_CALLBACK_MANAGER
+#if ORACLE_DUCKDB_15_PLUS
 	config.GetCallbackManager().Register(make_shared_ptr<OracleExtensionCallback>());
 #else
 	config.extension_callbacks.push_back(make_uniq<OracleExtensionCallback>());
