@@ -232,10 +232,10 @@ void OracleBindData::SetTable(OracleTableEntry &table) {
 
 static void OracleInitInternal(ClientContext &context, const OracleBindData &bind_data,
                                 OracleLocalState &lstate) {
-	// Use oracle_names (original Oracle data-dictionary case) for SQL generation.
-	// bind_data.names may have been lowercased by DuckDB's catalog pipeline; quoting
-	// a lowercased name like "emp_id" would fail because Oracle stores it as EMP_ID.
-	// oracle_names always carries the exact case returned by all_tab_columns.
+	// Column names for SQL generation. Both oracle_names and names are stored
+	// lower-cased (the dictionary load queries apply LOWER(...)); QuoteIdentifier
+	// re-applies Oracle's unquoted-identifier up-casing before quoting, so either
+	// source resolves to the correct upper-case dictionary entry.
 	const auto &sql_names =
 	    bind_data.oracle_names.empty() ? bind_data.names : bind_data.oracle_names;
 

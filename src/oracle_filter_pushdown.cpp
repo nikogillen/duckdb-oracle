@@ -79,7 +79,10 @@ static string TransformConstantFilter(const string &col_name, ConstantFilter &fi
 		break;
 	}
 	default:
-		val_str = val.ToString();
+		// Route every other type through ValueToOracleSQL, which escapes string-like
+		// values via WriteLiteral and emits numeric values unquoted. Never concatenate
+		// a raw ToString() here — it would allow SQL injection through filter values.
+		val_str = OracleUtils::ValueToOracleSQL(val);
 		break;
 	}
 	return OracleUtils::QuoteIdentifier(col_name) + " " + op + " " + val_str;
