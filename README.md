@@ -4,7 +4,10 @@ A DuckDB extension that attaches Oracle databases, modelled after `duckdb-postgr
 
 ## Requirements
 
-- Oracle Instant Client (or a full Oracle client installation) in your `PATH` / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`
+- Oracle Instant Client **19c or newer** (Basic or Basic Light), reachable via
+  `PATH` / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`. ODPI-C 6.0 dropped support for
+  older client libraries. The JSON and VECTOR type mappings additionally require an
+  Oracle **21c / 23ai** server.
 - The `oracle.duckdb_extension` binary for your platform and DuckDB version
 
 ## Installation
@@ -71,6 +74,29 @@ user/password@MYDB
 user/password@//host:1521/service?connect_timeout=10
 ```
 
+## Authentication with secrets (recommended)
+
+Passing `user/password@host` directly to `ATTACH` puts the password into your SQL
+text — and thus into query history, logs and the DuckDB catalog. Prefer a DuckDB
+**secret**, which keeps credentials out of the connect string (the password is
+redacted in `duckdb_secrets()`):
+
+```sql
+CREATE SECRET my_oracle (
+    TYPE oracle,
+    user 'scott',
+    password 'tiger',
+    connectString '//host:1521/service'
+);
+
+-- Attach using the secret (empty connect string)
+ATTACH '' AS mydb (TYPE oracle, SECRET my_oracle);
+```
+
+A secret named `__default_oracle` is applied automatically to any Oracle `ATTACH`
+that does not name a secret. Use `CREATE PERSISTENT SECRET …` to keep it across
+restarts.
+
 ## Extension options
 
 | Option | Default | Description |
@@ -116,6 +142,30 @@ duckdb
 
 The trace is written to stderr. Redirect it to a file with `2>odpi.log`.
 
+> **Warning:** levels `≥ 8` log bind values and SQL text, and the trace can
+> contain table data and connection details. Only enable it in trusted
+> environments, and protect/delete the log afterwards. For plain connection
+> diagnostics, `DPI_DEBUG_LEVEL=1` (errors) is usually enough.
+
+## Data type mapping
+
+| Oracle type | DuckDB type |
+|-------------|-------------|
+| `NUMBER(p,s)` | `SMALLINT` / `INTEGER` / `BIGINT` / `DECIMAL` (by precision/scale); unconstrained `NUMBER` → `DOUBLE` |
+| `BINARY_FLOAT` / `BINARY_DOUBLE` | `FLOAT` / `DOUBLE` |
+| `VARCHAR2` / `NVARCHAR2` / `CHAR` / `CLOB` / `NCLOB` / `LONG` | `VARCHAR` |
+| `RAW` / `LONG RAW` / `BLOB` | `BLOB` |
+| `DATE` / `TIMESTAMP` | `TIMESTAMP` |
+| `TIMESTAMP WITH TIME ZONE` | `TIMESTAMP WITH TIME ZONE` |
+| `BOOLEAN` (23ai) | `BOOLEAN` |
+| `JSON` (21c/23ai) | `JSON` |
+| `VECTOR` (23ai) | `LIST(FLOAT)` |
+| `INTERVAL YEAR TO MONTH`, `XMLTYPE`, `ROWID`, spatial, … | `VARCHAR` |
+
+`JSON` columns are serialized to text, so DuckDB's JSON functions work directly
+(`json_extract_string(col, '$.field')`). `VECTOR` columns (FLOAT32/FLOAT64/INT8)
+become a `FLOAT` list, usable with array operations and the VSS extension.
+
 ## DML — UPDATE and DELETE
 
 `UPDATE` and `DELETE` are supported and work as expected from DuckDB:
@@ -151,11 +201,29 @@ Using `ROWID` is necessary — not just a convenience — because DuckDB evaluat
 
 ## Building from source
 
+The extension is built with DuckDB's standard extension toolchain. `duckdb` and
+`extension-ci-tools` are git submodules; ODPI-C is fetched by CMake at configure
+time (pinned and SHA-256-verified), so it is not vendored.
+
 ```bash
-git clone --recurse-submodules https://github.com/rinie/duckdb-oracle
+git clone --recurse-submodules https://github.com/nikogillen/duckdb-oracle
 cd duckdb-oracle
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release
+make release          # or: make debug
 ```
 
-The compiled extension is at `build/release/oracle.duckdb_extension`.
+The compiled extension is written to
+`build/release/repository/<duckdb_version>/<platform>/oracle.duckdb_extension`.
+
+To build against a specific DuckDB line, check the submodule out at that tag
+before building:
+
+```bash
+( cd duckdb && git checkout v1.5.5 )   # or v1.4.5 for the LTS line
+make release
+```
+
+Load a locally built extension with `duckdb -unsigned`, then
+`LOAD '/abs/path/to/oracle.duckdb_extension';`.
+
+Requires: a C++ toolchain, CMake, Ninja (`GEN=ninja`), Python 3, and network
+access for the one-time ODPI-C download.
