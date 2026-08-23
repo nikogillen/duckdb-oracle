@@ -77,10 +77,13 @@ jobs:
             cp "$f" "dist/oracle-${ver}-${arch}.duckdb_extension"
           done
           cd dist
-          ls -la
           sha256sum *.duckdb_extension > SHA256SUMS
           cat SHA256SUMS
           test -s SHA256SUMS  # fail if nothing was collected
+          # Ship the license and third-party notices alongside the binaries
+          # (the extension bundles ODPI-C, which is UPL/Apache licensed).
+          cp "$GITHUB_WORKSPACE/LICENSE" "$GITHUB_WORKSPACE/THIRD_PARTY_LICENSES" .
+          ls -la
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
@@ -97,10 +100,12 @@ jobs:
           # Attach assets to an existing release (e.g. one created by hand with custom
           # notes); otherwise create the release. --clobber overwrites assets on re-runs.
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.duckdb_extension dist/SHA256SUMS \
+            gh release upload "$TAG" \
+              dist/*.duckdb_extension dist/SHA256SUMS dist/LICENSE dist/THIRD_PARTY_LICENSES \
               --repo "${{ github.repository }}" --clobber
           else
-            gh release create "$TAG" dist/*.duckdb_extension dist/SHA256SUMS \
+            gh release create "$TAG" \
+              dist/*.duckdb_extension dist/SHA256SUMS dist/LICENSE dist/THIRD_PARTY_LICENSES \
               --repo "${{ github.repository }}" \
               --title "$TAG" \
               --generate-notes
