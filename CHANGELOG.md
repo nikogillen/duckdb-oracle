@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Dependencies
+
+- ODPI-C is no longer vendored in the repo. It is now fetched at build time by
+  CMake, pinned to **v6.0.0** and verified via SHA-256 with `TLS_VERIFY ON`.
+  This removes ~260 vendored files and makes future updates a one-line change.
+  ODPI-C 6.0 drops support for Oracle Client libraries older than 19c (not a
+  concern here). (previously vendored at v5.3.0)
+
 ### Security
 
 - Fix SQL injection through unquoted Oracle identifiers: `QuoteIdentifier` now
