@@ -19,6 +19,11 @@
 #include "duckdb/main/connection_manager.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "oracle_logging.hpp"
+#include "oracle_duckdb_compat.hpp"
+
+#if ORACLE_DUCKDB_15_PLUS
+#include "duckdb/main/extension_callback_manager.hpp"
+#endif
 
 using namespace duckdb;
 
@@ -139,7 +144,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Storage extension
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+#if ORACLE_DUCKDB_15_PLUS
 	config.GetCallbackManager().Register("oracle", make_shared_ptr<OracleStorageExtension>());
+#else
+	config.storage_extensions["oracle"] = make_uniq<OracleStorageExtension>();
+#endif
 
 	// Extension options
 	config.AddExtensionOption("ora_connection_limit",
@@ -162,10 +171,18 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// Optimizer
 	OptimizerExtension oracle_optimizer;
 	oracle_optimizer.optimize_function = OracleOptimizer::Optimize;
+#if ORACLE_DUCKDB_15_PLUS
 	config.GetCallbackManager().Register(std::move(oracle_optimizer));
+#else
+	config.optimizer_extensions.push_back(std::move(oracle_optimizer));
+#endif
 
 	// Extension callback
+#if ORACLE_DUCKDB_15_PLUS
 	config.GetCallbackManager().Register(make_shared_ptr<OracleExtensionCallback>());
+#else
+	config.extension_callbacks.push_back(make_uniq<OracleExtensionCallback>());
+#endif
 	for (auto &connection :
 	     ConnectionManager::Get(loader.GetDatabaseInstance()).GetConnectionList()) {
 		connection->registered_state->Insert(

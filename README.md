@@ -5,7 +5,32 @@ A DuckDB extension that attaches Oracle databases, modelled after `duckdb-postgr
 ## Requirements
 
 - Oracle Instant Client (or a full Oracle client installation) in your `PATH` / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`
-- The `oracle.duckdb_extension` binary for your platform
+- The `oracle.duckdb_extension` binary for your platform and DuckDB version
+
+## Installation
+
+Pre-built binaries are published as **GitHub Release assets**, built in CI for
+Windows, Linux and macOS against both the DuckDB **1.4 LTS** and **1.5.x** lines.
+Each release ships a `SHA256SUMS` file and [build provenance attestations][attest],
+so you can verify a binary was built by this repo's workflow from this source.
+
+1. Download the `oracle.duckdb_extension` matching your platform and DuckDB
+   version from the [Releases page](../../releases).
+2. (Recommended) verify it:
+   ```bash
+   sha256sum -c SHA256SUMS --ignore-missing
+   gh attestation verify oracle.duckdb_extension --repo <owner>/duckdb-oracle
+   ```
+3. Load it in DuckDB (unsigned extensions must be allowed):
+   ```sql
+   -- start DuckDB with:  duckdb -unsigned
+   LOAD '/path/to/oracle.duckdb_extension';
+   ```
+
+Binaries are **no longer committed to this repository** — they are produced and
+attested by CI (see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
+
+[attest]: https://docs.github.com/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds
 
 ## Quick start
 

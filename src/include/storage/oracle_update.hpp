@@ -8,6 +8,7 @@
 #pragma once
 
 #include "duckdb/execution/physical_operator.hpp"
+#include "oracle_duckdb_compat.hpp"
 #include "duckdb/planner/operator/logical_update.hpp"
 
 namespace duckdb {
@@ -23,7 +24,7 @@ public:
 
 public:
 	// Source interface
-	SourceResultType GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+	SourceResultType ORACLE_GET_DATA_METHOD(ExecutionContext &context, DataChunk &chunk,
 	                                  OperatorSourceInput &input) const override;
 	bool IsSource() const override {
 		return true;
