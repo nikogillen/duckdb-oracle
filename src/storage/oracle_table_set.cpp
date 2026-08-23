@@ -433,6 +433,15 @@ optional_ptr<CatalogEntry> OracleTableSet::CreateTable(OracleTransaction &transa
                                                          BoundCreateTableInfo &info) {
 	auto create_sql = GetOracleCreateTable(info.Base());
 	transaction.Query(create_sql);
+	// Reload the just-created table from the data dictionary so the catalog entry
+	// carries the real Oracle column types/names. Building the entry from
+	// info.Base() alone leaves oracle_types empty, which crashes the scanner when
+	// the table is queried in the same session.
+	auto reloaded = ReloadEntry(transaction, info.Base().table);
+	if (reloaded) {
+		return reloaded;
+	}
+	// Fallback if the dictionary lookup failed for some reason.
 	auto tbl_entry = make_shared_ptr<OracleTableEntry>(
 	    static_cast<Catalog &>(catalog), static_cast<SchemaCatalogEntry &>(schema),
 	    info.Base());
