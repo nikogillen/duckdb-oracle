@@ -53,4 +53,9 @@ SELECT id, note FROM ora.demo.dck_roundtrip ORDER BY id;
 SELECT count(*) AS clob_nonempty FROM ora.demo.dck_roundtrip WHERE note = 'clob text via create';
 DROP TABLE ora.demo.dck_roundtrip;
 
+-- ODPI-C 6.0 type mapping: Oracle native JSON → DuckDB JSON, VECTOR → LIST(FLOAT).
+SELECT id, json_extract_string(doc, '$.name') AS name FROM ora.demo.t_feat ORDER BY id;
+SELECT id, len(emb) AS dims, emb[1] AS first_dim FROM ora.demo.t_feat ORDER BY id;
+SELECT count(*) AS json_ok FROM ora.demo.t_feat WHERE json_extract_string(doc, '$.name') = 'Alice';
+
 SELECT 'ALL INTEGRATION TESTS PASSED' AS result;

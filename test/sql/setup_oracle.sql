@@ -14,5 +14,14 @@ CREATE TABLE t_emp (id NUMBER(10), name VARCHAR2(100), salary NUMBER(10,2));
 INSERT INTO t_emp VALUES (1, 'Alice', 5000);
 INSERT INTO t_emp VALUES (2, 'O''Brien', 6200.50);
 INSERT INTO t_emp VALUES (3, 'Chen', 4800);
+BEGIN
+  EXECUTE IMMEDIATE 'DROP TABLE t_feat';
+EXCEPTION
+  WHEN OTHERS THEN NULL;
+END;
+/
+CREATE TABLE t_feat (id NUMBER(10), doc JSON, emb VECTOR(3, FLOAT32));
+INSERT INTO t_feat VALUES (1, '{"name":"Alice","tags":["x","y"]}', TO_VECTOR('[1.5, 2.5, 3.5]'));
+INSERT INTO t_feat VALUES (2, '{"nested":{"k":true}}', TO_VECTOR('[-0.25, 10, 0]'));
 COMMIT;
 EXIT
