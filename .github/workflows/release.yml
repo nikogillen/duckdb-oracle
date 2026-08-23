@@ -30,7 +30,9 @@ jobs:
   # ---- Build: DuckDB 1.4 LTS ------------------------------------------------
   build-1_4-lts:
     name: Build (DuckDB 1.4 LTS)
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4
+    # The reusable workflow file only lives on the ci-tools main branch; the DuckDB
+    # line to build against is selected via the duckdb_version / ci_tools_version inputs.
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
       extension_name: oracle
       duckdb_version: v1.4.5
@@ -41,7 +43,7 @@ jobs:
   # ---- Build: DuckDB 1.5.x --------------------------------------------------
   build-1_5:
     name: Build (DuckDB 1.5.x)
-    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@main
     with:
       extension_name: oracle
       duckdb_version: v1.5.5
