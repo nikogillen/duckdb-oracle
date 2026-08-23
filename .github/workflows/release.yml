@@ -1,0 +1,98 @@
+name: Release
+
+# Builds the Oracle extension for Windows, Linux and macOS against both the
+# DuckDB 1.4 LTS and 1.5.x lines, then publishes the binaries as GitHub Release
+# assets with a SHA256SUMS file and build-provenance attestations.
+#
+# Trigger:
+#   * push a tag `v*`   -> build, attest, and create/update the GitHub Release
+#   * workflow_dispatch -> build + attest only (no release), for testing the matrix
+#
+# The heavy lifting (per-platform toolchains, cross-compile, vcpkg) is delegated
+# to DuckDB's official reusable distribution workflow.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write      # create the release
+  id-token: write      # OIDC for build provenance
+  attestations: write  # write attestations
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- Build: DuckDB 1.4 LTS ------------------------------------------------
+  build-1_4-lts:
+    name: Build (DuckDB 1.4 LTS)
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.4
+    with:
+      extension_name: oracle
+      duckdb_version: v1.4.5
+      ci_tools_version: v1.4
+      # Native desktop platforms only (Windows/Linux/macOS); no WebAssembly.
+      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
+
+  # ---- Build: DuckDB 1.5.x --------------------------------------------------
+  build-1_5:
+    name: Build (DuckDB 1.5.x)
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5
+    with:
+      extension_name: oracle
+      duckdb_version: v1.5.5
+      ci_tools_version: v1.5
+      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads"
+
+  # ---- Collect, attest, and publish ----------------------------------------
+  release:
+    name: Attest & publish
+    needs: [build-1_4-lts, build-1_5]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all built extensions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: oracle-*-extension-*
+          path: artifacts
+
+      - name: Collect binaries and generate checksums
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          shopt -s nullglob
+          for d in artifacts/oracle-*-extension-*/; do
+            name="$(basename "$d")"                                   # oracle-v1.5.5-extension-linux_amd64
+            ver="$(echo "$name" | sed -E 's/^oracle-(v[0-9.]+)-extension-(.*)$/\1/')"
+            arch="$(echo "$name" | sed -E 's/^oracle-(v[0-9.]+)-extension-(.*)$/\2/')"
+            f="$(find "$d" -name '*.duckdb_extension' | head -1)"
+            if [ -z "$f" ]; then echo "no extension in $d" >&2; continue; fi
+            cp "$f" "dist/oracle-${ver}-${arch}.duckdb_extension"
+          done
+          cd dist
+          ls -la
+          sha256sum *.duckdb_extension > SHA256SUMS
+          cat SHA256SUMS
+          test -s SHA256SUMS  # fail if nothing was collected
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*.duckdb_extension"
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ github.ref_name }}" \
+            dist/*.duckdb_extension dist/SHA256SUMS \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
