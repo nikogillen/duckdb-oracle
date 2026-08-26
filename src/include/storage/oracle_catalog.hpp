@@ -24,11 +24,13 @@ public:
 	                        string schema_to_load,
 	                        OracleIsolationLevel isolation_level,
 	                        OraclePrivilegeLevel privilege_level,
-	                        ClientContext &context);
+	                        ClientContext &context, string config_dir = string());
 	~OracleCatalog();
 
 	string connection_string;
 	string attach_path;
+	//! Oracle client config directory (TNS_ADMIN) for wallet/tnsnames lookups.
+	string config_dir;
 	AccessMode access_mode;
 	OracleIsolationLevel isolation_level;
 	OraclePrivilegeLevel privilege_level;
@@ -41,6 +43,9 @@ public:
 	string GetDefaultSchema() const override {
 		return default_schema;
 	}
+
+	//! Reads the Oracle client config directory (TNS_ADMIN) from a secret, if set.
+	static string GetSecretConfigDir(ClientContext &context, string secret_name);
 
 	static string GetConnectionString(ClientContext &context, const string &attach_path,
 	                                   string secret_name);

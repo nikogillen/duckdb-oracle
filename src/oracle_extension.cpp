@@ -95,6 +95,11 @@ unique_ptr<BaseSecret> CreateOracleSecretFunction(ClientContext &context,
 			result->secret_map["password"] = named_param.second.ToString();
 		} else if (lower_name == "connectstring" || lower_name == "host") {
 			result->secret_map["connectString"] = named_param.second.ToString();
+		} else if (lower_name == "config_dir" || lower_name == "tns_admin" ||
+		           lower_name == "wallet_path") {
+			// Oracle client config directory (TNS_ADMIN); not a secret itself, so it
+			// stays readable in duckdb_secrets() to help with diagnostics.
+			result->secret_map["config_dir"] = named_param.second.ToString();
 		} else {
 			throw InternalException(
 			    "Unknown named parameter passed to CreateOracleSecretFunction: " + lower_name);
@@ -109,6 +114,9 @@ void SetOracleSecretParameters(CreateSecretFunction &function) {
 	function.named_parameters["password"] = LogicalType::VARCHAR;
 	function.named_parameters["connectString"] = LogicalType::VARCHAR;
 	function.named_parameters["host"] = LogicalType::VARCHAR; // alias
+	function.named_parameters["config_dir"] = LogicalType::VARCHAR;
+	function.named_parameters["tns_admin"] = LogicalType::VARCHAR;   // alias
+	function.named_parameters["wallet_path"] = LogicalType::VARCHAR; // alias
 }
 
 static void LoadInternal(ExtensionLoader &loader) {

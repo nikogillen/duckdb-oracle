@@ -27,6 +27,7 @@ static unique_ptr<Catalog> OracleAttach(optional_ptr<StorageExtensionInfo> stora
 
 	string secret_name;
 	string schema_to_load;
+	string config_dir;
 	OracleIsolationLevel isolation_level = OracleIsolationLevel::READ_COMMITTED;
 	OraclePrivilegeLevel privilege_level = OraclePrivilegeLevel::USER;
 
@@ -36,6 +37,16 @@ static unique_ptr<Catalog> OracleAttach(optional_ptr<StorageExtensionInfo> stora
 			secret_name = entry.second.ToString();
 		} else if (lower_name == "schema") {
 			schema_to_load = entry.second.ToString();
+		} else if (lower_name == "config_dir" || lower_name == "tns_admin" ||
+		           lower_name == "wallet_path") {
+			// Oracle client configuration directory (TNS_ADMIN): tnsnames.ora,
+			// sqlnet.ora and wallet files are resolved from here.
+			config_dir = entry.second.ToString();
+			if (!config_dir.empty() &&
+			    !FileSystem::GetFileSystem(context).DirectoryExists(config_dir)) {
+				throw InvalidInputException(
+				    "Oracle %s \"%s\" is not an existing directory", lower_name, config_dir);
+			}
 		} else if (lower_name == "isolation_level") {
 			auto param = StringUtil::Lower(entry.second.ToString());
 			if (param == "read committed") {
@@ -67,10 +78,14 @@ static unique_ptr<Catalog> OracleAttach(optional_ptr<StorageExtensionInfo> stora
 
 	auto connection_string =
 	    OracleCatalog::GetConnectionString(context, attach_path, secret_name);
+	if (config_dir.empty()) {
+		// Fall back to the secret's config_dir; an explicit ATTACH option wins.
+		config_dir = OracleCatalog::GetSecretConfigDir(context, secret_name);
+	}
 	return make_uniq<OracleCatalog>(db, std::move(connection_string),
 	                                 std::move(attach_path), attach_options.access_mode,
 	                                 std::move(schema_to_load), isolation_level,
-	                                 privilege_level, context);
+	                                 privilege_level, context, std::move(config_dir));
 }
 
 static unique_ptr<TransactionManager>

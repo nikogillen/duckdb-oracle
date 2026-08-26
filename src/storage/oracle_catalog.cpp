@@ -17,9 +17,10 @@ OracleCatalog::OracleCatalog(AttachedDatabase &db_p, string connection_string_p,
                                string schema_to_load,
                                OracleIsolationLevel isolation_level,
                                OraclePrivilegeLevel privilege_level,
-                               ClientContext &context)
+                               ClientContext &context, string config_dir_p)
     : Catalog(db_p), connection_string(std::move(connection_string_p)),
-      attach_path(std::move(attach_path_p)), access_mode(access_mode),
+      attach_path(std::move(attach_path_p)), config_dir(std::move(config_dir_p)),
+      access_mode(access_mode),
       isolation_level(isolation_level), privilege_level(privilege_level),
       schemas(*this, schema_to_load), connection_pool(*this) {
 	// Determine default schema from current user if not specified
@@ -85,11 +86,27 @@ string OracleCatalog::GetConnectionString(ClientContext &context,
 		if (!user.empty() && !password.empty()) {
 			// Reconstruct as user/password@conn_str
 			connection_string = user + "/" + password + "@" + conn_str;
+		} else if (user.empty() && password.empty() && !conn_str.empty()) {
+			// Wallet / external authentication: the credentials live in the wallet, so
+			// the connect string alone identifies the target.
+			connection_string = conn_str;
 		}
 	} else if (explicit_secret) {
 		throw BinderException("Secret with name \"%s\" not found", secret_name);
 	}
 	return connection_string;
+}
+
+string OracleCatalog::GetSecretConfigDir(ClientContext &context, string secret_name) {
+	if (secret_name.empty()) {
+		secret_name = "__default_oracle";
+	}
+	auto secret_entry = GetSecret(context, secret_name);
+	if (!secret_entry) {
+		return string();
+	}
+	const auto &kv_secret = dynamic_cast<const KeyValueSecret &>(*secret_entry->secret);
+	return kv_secret.TryGetValue("config_dir").ToString();
 }
 
 void OracleCatalog::Initialize(bool load_builtin) {
