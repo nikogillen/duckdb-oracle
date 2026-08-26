@@ -71,6 +71,14 @@ public:
 				dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);
 				throw IOException("Oracle getQueryInfo failed: %s", string(error_info.message));
 			}
+			// Fetch NUMBER columns that map to DECIMAL as text. ODPI-C would otherwise
+			// hand them over as a double, which cannot represent Oracle's up to 38
+			// significant digits and silently loses precision.
+			if (col_info[i].typeInfo.oracleTypeNum == DPI_ORACLE_TYPE_NUMBER &&
+			    col_info[i].typeInfo.scale != 0) {
+				dpiStmt_defineValue(stmt, i + 1, DPI_ORACLE_TYPE_NUMBER,
+				                    DPI_NATIVE_TYPE_BYTES, 0, 0, nullptr);
+			}
 		}
 	}
 
@@ -248,6 +256,13 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 		}
 		if (column_id == COLUMN_IDENTIFIER_ROW_ID) {
 			col_names += "ROWID";
+		} else if (column_id < bind_data.oracle_types.size() &&
+		           bind_data.oracle_types[column_id].info ==
+		               OracleTypeAnnotation::SPATIAL_AS_GEOMETRY) {
+			// Let Oracle serialize SDO_GEOMETRY to WKT (returned as a CLOB); the
+			// converter turns that into GEOMETRY (1.5+) or leaves it as WKT text.
+			col_names += "SDO_UTIL.TO_WKTGEOMETRY(" +
+			             OracleUtils::QuoteIdentifier(sql_names[column_id]) + ")";
 		} else {
 			col_names += OracleUtils::QuoteIdentifier(sql_names[column_id]);
 		}

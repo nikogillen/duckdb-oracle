@@ -198,8 +198,61 @@ static OraclePrivilegeLevel GetEffectiveLevel(const OracleSchemaEntry &schema) {
 // Row parsing helpers
 // ---------------------------------------------------------------------------
 
+// Look up the SRID of each SDO_GEOMETRY column of a table.
+//
+// Only SRIDs that Oracle itself reports as non-legacy are returned: those are
+// identical to the EPSG code. Oracle's legacy SRIDs (e.g. 8307) use a different
+// numbering than EPSG (8307 is EPSG:4326), so labelling them "EPSG:<srid>" would
+// point at the wrong reference system — worse than reporting no CRS at all.
+//
+// Entirely best-effort: databases without Oracle Spatial have no
+// *_SDO_GEOM_METADATA views, and the query then fails with ORA-00942. Any error
+// simply yields an empty map, i.e. geometries without a CRS.
+static case_insensitive_map_t<int64_t> LoadSpatialSRIDs(OracleTransaction &transaction,
+                                                          OraclePrivilegeLevel level,
+                                                          const string &owner,
+                                                          const string &table_name) {
+	case_insensitive_map_t<int64_t> result;
+	try {
+		string query;
+		unordered_map<string, string> binds;
+		if (level == OraclePrivilegeLevel::USER) {
+			query = R"(
+SELECT LOWER(m.column_name), m.srid
+FROM user_sdo_geom_metadata m
+JOIN mdsys.sdo_coord_ref_sys c ON c.srid = m.srid AND c.is_legacy = 'FALSE'
+WHERE m.table_name = :table_name
+)";
+			binds = {{"table_name", StringUtil::Upper(table_name)}};
+		} else {
+			query = R"(
+SELECT LOWER(m.column_name), m.srid
+FROM all_sdo_geom_metadata m
+JOIN mdsys.sdo_coord_ref_sys c ON c.srid = m.srid AND c.is_legacy = 'FALSE'
+WHERE m.owner = :owner AND m.table_name = :table_name
+)";
+			binds = {{"owner", StringUtil::Upper(owner)},
+			         {"table_name", StringUtil::Upper(table_name)}};
+		}
+		auto srid_result = transaction.Query(query, binds);
+		if (srid_result) {
+			for (idx_t row = 0; row < srid_result->Count(); row++) {
+				if (srid_result->IsNull(row, 1)) {
+					continue;
+				}
+				result[srid_result->GetString(row, 0)] = srid_result->GetInt64(row, 1);
+			}
+		}
+	} catch (...) {
+		// No Oracle Spatial installed, or no privileges — proceed without CRS.
+		result.clear();
+	}
+	return result;
+}
+
 void OracleTableSet::AddColumn(OracleResult &result, idx_t row,
-                                OracleTableInfo &table_info) {
+                                OracleTableInfo &table_info,
+                                const case_insensitive_map_t<int64_t> *srid_map) {
 	// col indices: 0=owner, 1=table_name, 2=num_rows, 3=col_name, 4=data_type,
 	//              5=data_length, 6=data_precision, 7=data_scale, 8=nullable,
 	//              9=table_type, 10=col_id
@@ -216,6 +269,13 @@ void OracleTableSet::AddColumn(OracleResult &result, idx_t row,
 	}
 
 	auto col_name = result.GetString(row, 3);
+
+	if (srid_map) {
+		auto entry = srid_map->find(col_name);
+		if (entry != srid_map->end()) {
+			type_info.srid = entry->second;
+		}
+	}
 
 	OracleType oracle_type;
 	auto column_type = OracleUtils::TypeToLogicalType(type_info, oracle_type);
@@ -323,8 +383,18 @@ unique_ptr<OracleTableInfo> OracleTableSet::GetTableInfo(OracleTransaction &tran
 	if (!col_result->IsNull(0, 2)) {
 		table_info->approx_num_rows = (idx_t)col_result->GetInt64(0, 2);
 	}
+	// Only pay for the spatial-metadata round-trip when the table actually has a
+	// geometry column.
+	case_insensitive_map_t<int64_t> srid_map;
 	for (idx_t row = 0; row < col_rows; row++) {
-		AddColumn(*col_result, row, *table_info); // also sets is_view via col 9
+		auto type_name = StringUtil::Upper(col_result->GetString(row, 4));
+		if (type_name == "SDO_GEOMETRY" || type_name == "MDSYS.SDO_GEOMETRY") {
+			srid_map = LoadSpatialSRIDs(transaction, level, schema.oracle_name, table_name);
+			break;
+		}
+	}
+	for (idx_t row = 0; row < col_rows; row++) {
+		AddColumn(*col_result, row, *table_info, &srid_map); // also sets is_view via col 9
 	}
 
 	// Add constraints

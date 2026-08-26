@@ -30,3 +30,15 @@
 #else
 #  define ORACLE_GET_DATA_METHOD GetData
 #endif
+
+// A native GEOMETRY logical type (with optional CRS) exists only from DuckDB 1.5
+// on. On 1.4 LTS, Oracle SDO_GEOMETRY is surfaced as WKT text in a VARCHAR.
+#if defined(__has_include)
+#  if __has_include("duckdb/common/types/geometry_crs.hpp")
+#    define ORACLE_HAS_GEOMETRY_TYPE 1
+#  else
+#    define ORACLE_HAS_GEOMETRY_TYPE 0
+#  endif
+#else
+#  define ORACLE_HAS_GEOMETRY_TYPE 0
+#endif
