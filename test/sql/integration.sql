@@ -75,6 +75,29 @@ INSERT INTO ora.demo.dck_bulk SELECT i, 'appended', i, NULL FROM range(5000, 600
 SELECT count(*) AS after_append FROM ora.demo.dck_bulk;
 DROP TABLE ora.demo.dck_bulk;
 
--- Spatial: Oracle SDO_GEOMETRY. Skipped automatically when the database has no
--- Oracle Spatial (t_geo is then absent — see setup_oracle.sql).
+-- Values the previous literal-based insert could not write at all: strings past
+-- Oracle's 4000-byte literal limit (also exercising the dynamic bind path above
+-- 8 KB) and blobs past the HEXTORAW limit.
+DROP TABLE IF EXISTS ora.demo.dck_big;
+CREATE TABLE ora.demo.dck_big AS
+SELECT 1 AS id, repeat('x', 5000) AS s, repeat('a', 50000)::BLOB AS payload
+UNION ALL
+SELECT 2, repeat('y', 40000), NULL;
+SELECT id, length(s) AS text_len, octet_length(payload) AS blob_len
+FROM ora.demo.dck_big ORDER BY id;
+DROP TABLE ora.demo.dck_big;
+
+-- Remaining bind types round-trip (decimal precision, dates, timestamps, unicode).
+DROP TABLE IF EXISTS ora.demo.dck_types;
+CREATE TABLE ora.demo.dck_types AS
+SELECT 1 AS id,
+       12345678901234567890.1234567890::DECIMAL(38,10) AS big_dec,
+       DATE '2026-03-01' AS d,
+       TIMESTAMP '2026-03-01 12:34:56.654321' AS ts,
+       'Grüße ✓ O''Brien' AS unicode_text;
+SELECT big_dec, d, ts, unicode_text FROM ora.demo.dck_types;
+DROP TABLE ora.demo.dck_types;
+
+-- Spatial (SDO_GEOMETRY) is covered by integration_spatial.sql, which the runner
+-- executes only when the database has Oracle Spatial.
 SELECT 'ALL INTEGRATION TESTS PASSED' AS result;

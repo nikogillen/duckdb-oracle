@@ -162,7 +162,8 @@ jobs:
             echo "SELECT count(*) AS wallet_path_ok FROM ora.demo.t_emp;"
           } | ./build/release/duckdb -unsigned
           # Without config_dir the same alias must fail (proves the setting is what works).
-          if { echo "LOAD '${EXT}';"
+          if { echo ".bail on"
+               echo "LOAD '${EXT}';"
                echo "ATTACH 'demo/ci_demopw@LOCALTEST' AS ora (TYPE oracle);"
                echo "SELECT 1;"; } | ./build/release/duckdb -unsigned 2>/dev/null; then
             echo "expected the TNS alias to fail without config_dir" >&2

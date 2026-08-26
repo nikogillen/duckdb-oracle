@@ -16,6 +16,10 @@
   `tnsnames.ora` / `sqlnet.ora` / wallet files. External authentication (wallet-stored
   credentials, `/@alias`) is enabled automatically when neither user nor password
   is given.
+- Map Oracle 23ai **VECTOR** columns to DuckDB `LIST(FLOAT)` (FLOAT32/FLOAT64/INT8
+  formats), usable with array/VSS operations.
+- Map Oracle native **JSON** columns to DuckDB `JSON` (recursive serialization),
+  so DuckDB's JSON functions work directly on Oracle JSON.
 
 ### Performance
 
@@ -32,16 +36,6 @@
   through `double` and an intermediate `int64`, corrupting values with more than
   ~15 significant digits (a `DECIMAL(38,10)` could come back as a completely
   different number). Such columns are now fetched as text and parsed exactly.
-
-### Features
-
-- Map Oracle 23ai **VECTOR** columns to DuckDB `LIST(FLOAT)` (FLOAT32/FLOAT64/INT8
-  formats), usable with array/VSS operations.
-- Map Oracle native **JSON** columns to DuckDB `JSON` (recursive serialization),
-  so DuckDB's JSON functions work directly on Oracle JSON.
-
-### Fixes
-
 - Fix scanner crash when querying a table created via the extension in the same
   session (empty `oracle_types`); the entry is now reloaded from the data dictionary.
 - Fix CLOB/NCLOB (VARCHAR) and BLOB columns reading back empty; LOB handles are now

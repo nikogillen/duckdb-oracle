@@ -6,6 +6,9 @@
 
 #include <cctype>
 #include <cstring>
+#ifdef _WIN32
+#include "duckdb/common/windows.hpp"
+#endif
 
 namespace duckdb {
 
@@ -101,14 +104,22 @@ public:
 		if (config_dir.empty()) {
 			return;
 		}
+#ifdef _WIN32
+		// Read and write through the same (Win32) environment: it is not kept in
+		// sync with the CRT environment that getenv() sees.
+		char buffer[MAX_PATH];
+		auto length = GetEnvironmentVariableA("TNS_ADMIN", buffer, sizeof(buffer));
+		had_previous = length > 0 && length < sizeof(buffer);
+		if (had_previous) {
+			previous_value.assign(buffer, length);
+		}
+		changed = SetEnvironmentVariableA("TNS_ADMIN", config_dir.c_str()) != 0;
+#else
 		const char *previous = getenv("TNS_ADMIN");
 		had_previous = previous != nullptr;
 		if (had_previous) {
 			previous_value = previous;
 		}
-#ifdef _WIN32
-		changed = SetEnvironmentVariableA("TNS_ADMIN", config_dir.c_str()) != 0;
-#else
 		changed = setenv("TNS_ADMIN", config_dir.c_str(), 1) == 0;
 #endif
 	}
@@ -143,8 +154,11 @@ dpiConn *OracleUtils::OraConnect(const string &dsn, const string &attach_path,
 	string user, password, connect_string;
 	ParseDSN(dsn, user, password, connect_string);
 
-	// Always hold the lock across the connect, even without a config directory:
-	// otherwise a plain connect could observe another connect's TNS_ADMIN.
+	// Hold the lock across the connect even without a config directory: TNS_ADMIN is
+	// process-wide, so a plain connect must not observe another connect's setting.
+	// This serializes connects; acceptable because the pool caches connections, so
+	// connects are rare. (A shared_mutex would let plain connects run in parallel,
+	// but the extension targets C++11.)
 	lock_guard<mutex> env_lock(g_tns_admin_mutex);
 	ScopedTnsAdmin tns_admin(config_dir);
 

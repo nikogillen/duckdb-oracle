@@ -1,5 +1,6 @@
 #include "oracle_conversion.hpp"
 #include "oracle_utils.hpp"
+#include "oracle_duckdb_compat.hpp"
 
 #include "duckdb/common/types/date.hpp"
 #include "duckdb/common/types/time.hpp"
@@ -441,9 +442,13 @@ void OracleConvertValue(Vector &col, idx_t out_row,
 			break;
 		}
 		string_t geom;
-		if (!Geometry::FromString(string_t(wkt.c_str(), (uint32_t)wkt.size()), geom, col,
-		                          false)) {
-			// Not parseable as WKT — surface NULL rather than failing the whole scan.
+		try {
+			// FromString throws on invalid WKT (its bool return is always true), e.g.
+			// for Oracle geometries WKT cannot express such as circular arcs. Surface
+			// those as NULL instead of failing the whole scan.
+			Geometry::FromString(string_t(wkt.c_str(), (uint32_t)wkt.size()), geom, col,
+			                     false);
+		} catch (const std::exception &) {
 			FlatVector::SetNull(col, out_row, true);
 			break;
 		}
