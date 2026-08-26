@@ -58,4 +58,23 @@ SELECT id, json_extract_string(doc, '$.name') AS name FROM ora.demo.t_feat ORDER
 SELECT id, len(emb) AS dims, emb[1] AS first_dim FROM ora.demo.t_feat ORDER BY id;
 SELECT count(*) AS json_ok FROM ora.demo.t_feat WHERE json_extract_string(doc, '$.name') = 'Alice';
 
+-- Bulk insert via ODPI-C array binding: several thousand rows exercise the batch
+-- path (one executeMany per chunk) across the common column types, including NULLs.
+DROP TABLE IF EXISTS ora.demo.dck_bulk;
+CREATE TABLE ora.demo.dck_bulk AS
+SELECT i AS id,
+       'name_' || i AS name,
+       i * 1.5 AS val,
+       CASE WHEN i % 7 = 0 THEN NULL ELSE i % 100 END AS maybe_null
+FROM range(5000) t(i);
+SELECT count(*) AS bulk_rows, sum(id) AS bulk_checksum FROM ora.demo.dck_bulk;
+SELECT count(*) AS bulk_nulls FROM ora.demo.dck_bulk WHERE maybe_null IS NULL;
+SELECT name FROM ora.demo.dck_bulk WHERE id = 4999;
+-- Append into the existing table to exercise INSERT INTO (not just CTAS).
+INSERT INTO ora.demo.dck_bulk SELECT i, 'appended', i, NULL FROM range(5000, 6000) t(i);
+SELECT count(*) AS after_append FROM ora.demo.dck_bulk;
+DROP TABLE ora.demo.dck_bulk;
+
+-- Spatial: Oracle SDO_GEOMETRY. Skipped automatically when the database has no
+-- Oracle Spatial (t_geo is then absent — see setup_oracle.sql).
 SELECT 'ALL INTEGRATION TESTS PASSED' AS result;

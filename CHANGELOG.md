@@ -4,6 +4,37 @@
 
 ### Features
 
+- **Oracle Spatial**: `SDO_GEOMETRY` columns are now read as DuckDB `GEOMETRY`
+  (DuckDB 1.5+), with the column's registered SRID exposed as the CRS
+  (`GEOMETRY('EPSG:4326')`). Oracle serializes the value server-side via
+  `SDO_UTIL.TO_WKTGEOMETRY`. On DuckDB 1.4 LTS, which has no `GEOMETRY` type, the
+  geometry is returned as WKT text in a `VARCHAR`. Only SRIDs that Oracle reports
+  as non-legacy are labelled as EPSG codes, since Oracle's legacy SRIDs use a
+  different numbering.
+- **Oracle Wallet / TNS_ADMIN**: new `config_dir` option (aliases: `tns_admin`,
+  `wallet_path`) on `ATTACH` and on `CREATE SECRET`, pointing at a directory with
+  `tnsnames.ora` / `sqlnet.ora` / wallet files. External authentication (wallet-stored
+  credentials, `/@alias`) is enabled automatically when neither user nor password
+  is given.
+
+### Performance
+
+- **Bulk inserts now use ODPI-C array binding** (`dpiStmt_executeMany`): one
+  round-trip per chunk instead of one `INSERT` statement per row — roughly **10x
+  faster** in local measurements (20k rows: 4.9s → 0.5s). This also fixes values
+  that the old literal path could not write at all: strings beyond Oracle's
+  4000-byte literal limit and BLOBs beyond the `HEXTORAW` limit. Unsupported column
+  types transparently fall back to the previous row-by-row path.
+
+### Fixes
+
+- Fix silent precision loss on `DECIMAL` reads: Oracle `NUMBER` values were routed
+  through `double` and an intermediate `int64`, corrupting values with more than
+  ~15 significant digits (a `DECIMAL(38,10)` could come back as a completely
+  different number). Such columns are now fetched as text and parsed exactly.
+
+### Features
+
 - Map Oracle 23ai **VECTOR** columns to DuckDB `LIST(FLOAT)` (FLOAT32/FLOAT64/INT8
   formats), usable with array/VSS operations.
 - Map Oracle native **JSON** columns to DuckDB `JSON` (recursive serialization),
