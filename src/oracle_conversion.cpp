@@ -95,9 +95,18 @@ static bool OracleParseDecimal(const string &text, uint8_t scale, hugeint_t &res
 		pos++;
 	}
 
-	hugeint_t digits(0);
+	// Collect the significant digits rather than accumulating into a hugeint right
+	// away. Rescaling below then only ever multiplies and never divides, which
+	// matters beyond style: `Hugeint::Divide` and `Hugeint::Modulo` are templates
+	// whose `<false>` specialization DuckDB defines and exports in its own library
+	// but never declares in the header, so every caller instantiates a second copy
+	// from the primary template. GCC and Clang fold those COMDAT symbols, MSVC does
+	// not - it fails the extension link with LNK2005 (Windows-only, and therefore
+	// invisible until a release build runs).
+	// Working from the digits also avoids building a value that would overflow only
+	// to divide it back down afterwards.
+	string digits;
 	int64_t exponent = 0; // decimal places already consumed
-	bool any_digit = false;
 	bool seen_dot = false;
 	for (; pos < text.size(); pos++) {
 		char c = text[pos];
@@ -114,13 +123,12 @@ static bool OracleParseDecimal(const string &text, uint8_t scale, hugeint_t &res
 		if (c < '0' || c > '9') {
 			return false;
 		}
-		any_digit = true;
-		digits = Hugeint::Add(Hugeint::Multiply(digits, hugeint_t(10)), hugeint_t(c - '0'));
+		digits += c;
 		if (seen_dot) {
 			exponent++;
 		}
 	}
-	if (!any_digit) {
+	if (digits.empty()) {
 		return false;
 	}
 	if (pos < text.size() && (text[pos] == 'e' || text[pos] == 'E')) {
@@ -149,24 +157,30 @@ static bool OracleParseDecimal(const string &text, uint8_t scale, hugeint_t &res
 		exponent -= exp_negative ? -exp_value : exp_value;
 	}
 
-	// Rescale to the target scale.
+	// Rescale to the target scale. `shift` > 0 appends zeros, `shift` < 0 drops that
+	// many trailing digits; `keep` is how many leading digits survive.
 	int64_t shift = (int64_t)scale - exponent;
+	int64_t total = (int64_t)digits.size();
+	int64_t keep = shift >= 0 ? total : total + shift;
+
+	hugeint_t value(0);
+	for (int64_t i = 0; i < keep; i++) {
+		value = Hugeint::Add(Hugeint::Multiply(value, hugeint_t(10)),
+		                     hugeint_t(digits[(idx_t)i] - '0'));
+	}
 	if (shift > 0) {
 		for (int64_t i = 0; i < shift; i++) {
-			digits = Hugeint::Multiply(digits, hugeint_t(10));
+			value = Hugeint::Multiply(value, hugeint_t(10));
 		}
-	} else if (shift < 0) {
-		// Drop excess decimals, rounding half away from zero on the last one.
-		for (int64_t i = 0; i < -shift - 1; i++) {
-			digits = Hugeint::Divide(digits, hugeint_t(10));
-		}
-		auto last = Hugeint::Modulo(digits, hugeint_t(10));
-		digits = Hugeint::Divide(digits, hugeint_t(10));
-		if (Hugeint::Cast<int64_t>(last) >= 5) {
-			digits = Hugeint::Add(digits, hugeint_t(1));
+	} else if (keep >= 0 && keep < total) {
+		// Round half away from zero on the first dropped digit. `keep` can be
+		// negative when every digit is dropped (0.005 at scale 0), and then the
+		// value rounds to zero with no digit to inspect.
+		if (digits[(idx_t)keep] >= '5') {
+			value = Hugeint::Add(value, hugeint_t(1));
 		}
 	}
-	result = negative ? Hugeint::Negate(digits) : digits;
+	result = negative ? Hugeint::Negate(value) : value;
 	return true;
 }
 
