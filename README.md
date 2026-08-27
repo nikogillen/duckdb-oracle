@@ -139,20 +139,44 @@ Pre-built binaries are published for every combination below:
 
 ## Installation
 
-1. Download the `oracle.duckdb_extension` for your platform and DuckDB version
-   from the [Releases page](../../releases).
-2. (Recommended) verify it:
+1. Download the asset for your platform **and** your DuckDB version from the
+   [Releases page](../../releases). They are named
+   `oracle-<duckdb-version>-<platform>.duckdb_extension`, for example
+   `oracle-v1.5.5-osx_arm64.duckdb_extension` or
+   `oracle-v1.4.5-windows_amd64.duckdb_extension`.
+
+2. (Recommended) verify it — run this in the directory you downloaded to, with
+   `SHA256SUMS` from the same release:
+
    ```bash
-   sha256sum -c SHA256SUMS --ignore-missing
-   gh attestation verify oracle.duckdb_extension --repo nikogillen/duckdb-oracle
+   sha256sum -c SHA256SUMS --ignore-missing      # macOS: shasum -a 256 -c ...
+   gh attestation verify oracle-v1.5.5-osx_arm64.duckdb_extension \
+      --repo nikogillen/duckdb-oracle
    ```
-3. Load it (unsigned extensions must be allowed):
+
+3. **Rename it to `oracle.duckdb_extension`.** DuckDB derives the extension's
+   entry point from the file name, so loading the file under its release name
+   fails with:
+
+   ```
+   IO Error: ... did not contain the expected entrypoint function 'oracle-v1_duckdb_cpp_init'
+   ```
+
+   ```bash
+   mv oracle-v1.5.5-osx_arm64.duckdb_extension oracle.duckdb_extension
+   ```
+
+4. Load it (unsigned extensions must be allowed):
+
    ```bash
    duckdb -unsigned
    ```
    ```sql
    LOAD '/path/to/oracle.duckdb_extension';
    ```
+
+Match the DuckDB version exactly — an extension built for `v1.5.5` refuses to
+load into `v1.4.5` and vice versa. Check yours with `duckdb --version`.
 
 Binaries are built and attested by CI, not committed to this repo.
 
