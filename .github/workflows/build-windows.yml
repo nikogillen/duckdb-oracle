@@ -1,0 +1,37 @@
+name: Build Windows (smoke)
+
+# Windows was only ever built during a release, so anything that compiles on
+# Linux and macOS but fails on MSVC stayed invisible until a tag was pushed.
+# That is how v2.1.0 first failed: a duplicate-symbol link error (LNK2005) which
+# GCC and Clang tolerate but MSVC does not.
+#
+# This runs the same reusable workflow the release uses, restricted to
+# windows_amd64, so it exercises the real toolchain rather than an approximation.
+#
+# On `main` only, not on pull requests: a Windows build takes ~25 minutes and
+# Windows runner minutes are billed at a higher rate, so paying that on every
+# push to a branch is not worth it. Running it right after merge still catches a
+# breakage long before anyone pushes a tag.
+#
+# Scope: DuckDB 1.5.x only. The release builds 1.4 LTS as well; use the
+# `workflow_dispatch` on release.yml for a full-matrix dry run before tagging.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows amd64 (DuckDB 1.5.x)
+    uses: duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml@v1.5.5
+    with:
+      extension_name: oracle
+      duckdb_version: v1.5.5
+      ci_tools_version: v1.5.5
+      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads;linux_amd64;linux_arm64;linux_amd64_musl;osx_amd64;osx_arm64;windows_amd64_mingw"
