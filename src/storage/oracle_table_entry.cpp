@@ -52,9 +52,21 @@ unique_ptr<BaseStatistics> OracleTableEntry::GetStatistics(ClientContext &contex
 
 TableFunction OracleTableEntry::GetScanFunction(ClientContext &context,
                                                   unique_ptr<FunctionData> &bind_data) {
-	OracleScanFunction fun;
 	auto result = make_uniq<OracleBindData>();
 	auto &catalog = this->catalog.Cast<OracleCatalog>();
+
+	// Without filter pushdown Oracle sends every row and DuckDB discards most of
+	// them locally, so `WHERE id = 5` still transfers the whole table. The scan
+	// function only receives DuckDB's filters when it advertises the capability,
+	// hence the two variants.
+	Value pushdown_setting;
+	bool filter_pushdown =
+	    !context.TryGetCurrentSetting("ora_experimental_filter_pushdown", pushdown_setting) ||
+	    pushdown_setting.IsNull() || BooleanValue::Get(pushdown_setting);
+	// Both variants only set flags on TableFunction and add no members of their own,
+	// so assigning to the base is intentional and loses nothing.
+	TableFunction fun = filter_pushdown ? static_cast<TableFunction>(OracleScanFunctionFilterPushdown())
+	                                    : static_cast<TableFunction>(OracleScanFunction());
 
 	result->dsn = catalog.connection_string;
 	result->attach_path = catalog.attach_path;

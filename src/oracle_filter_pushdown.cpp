@@ -99,6 +99,8 @@ static string TransformFilter(const string &col_name, TableFilter &filter) {
 	case TableFilterType::IS_NOT_NULL:
 		return OracleUtils::QuoteIdentifier(col_name) + " IS NOT NULL";
 	case TableFilterType::CONJUNCTION_AND: {
+		// Dropping a conjunct we cannot translate is safe: it only WIDENS the
+		// predicate, so Oracle returns a superset and DuckDB filters the rest.
 		auto &conj = filter.Cast<ConjunctionAndFilter>();
 		vector<string> parts;
 		for (auto &child : conj.child_filters) {
@@ -113,13 +115,18 @@ static string TransformFilter(const string &col_name, TableFilter &filter) {
 		return "(" + StringUtil::Join(parts, " AND ") + ")";
 	}
 	case TableFilterType::CONJUNCTION_OR: {
+		// The opposite of AND: dropping a disjunct NARROWS the predicate and would
+		// lose rows. DuckDB removes a filter it considers fully pushed down from the
+		// plan, so nothing would filter those rows back in. Give up on the whole OR
+		// unless every branch translates.
 		auto &conj = filter.Cast<ConjunctionOrFilter>();
 		vector<string> parts;
 		for (auto &child : conj.child_filters) {
 			auto s = TransformFilter(col_name, *child);
-			if (!s.empty()) {
-				parts.push_back(s);
+			if (s.empty()) {
+				return string();
 			}
+			parts.push_back(s);
 		}
 		if (parts.empty()) {
 			return string();
@@ -131,16 +138,53 @@ static string TransformFilter(const string &col_name, TableFilter &filter) {
 	}
 }
 
+//! Whether a filter on this column may be sent to Oracle at all. Being wrong in the
+//! permissive direction is not a slow query but a failing one, so anything that is
+//! not a plainly comparable scalar stays with DuckDB.
+static bool CanPushFilterOnColumn(const OracleType &oracle_type, const LogicalType &duck_type) {
+	switch (oracle_type.info) {
+	case OracleTypeAnnotation::CLOB_AS_VARCHAR:
+		// ORA-22848: a CLOB/NCLOB/LONG cannot be used as a comparison key. Note that
+		// DuckDB VARCHAR columns created through this extension are Oracle CLOBs, so
+		// this is the common case, not an exotic one.
+		return false;
+	case OracleTypeAnnotation::CAST_TO_VARCHAR:
+		// The projection casts these to VARCHAR; a filter would compare the raw
+		// column (XMLTYPE, INTERVAL, ...) against a text literal instead.
+		return false;
+	case OracleTypeAnnotation::JSON_AS_JSON:
+	case OracleTypeAnnotation::VECTOR_AS_LIST:
+	case OracleTypeAnnotation::SPATIAL_AS_GEOMETRY:
+		// Read through JSON_SERIALIZE / SDO_UTIL.TO_WKTGEOMETRY / vector decoding —
+		// the stored value is not comparable to the serialized form DuckDB filters on.
+		return false;
+	default:
+		break;
+	}
+	// BLOB, RAW and LONG RAW all arrive as BLOB. Oracle accepts RAW as a comparison
+	// key but not BLOB, and they are indistinguishable here, so stay conservative.
+	return duck_type.id() != LogicalTypeId::BLOB;
+}
+
 string OracleFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
                                                optional_ptr<TableFilterSet> filters,
-                                               const vector<string> &names) {
+                                               const vector<string> &names,
+                                               const vector<OracleType> &oracle_types,
+                                               const vector<LogicalType> &duck_types) {
 	if (!filters || filters->filters.empty()) {
 		return string();
 	}
 	vector<string> filter_parts;
 	for (auto &entry : filters->filters) {
 		auto col_idx = column_ids[entry.first];
-		if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
+		// ROWID and any other virtual column has no counterpart in `names`. Skipping
+		// is safe here because the parts are joined with AND (see above).
+		if (col_idx == COLUMN_IDENTIFIER_ROW_ID || col_idx >= names.size()) {
+			continue;
+		}
+		// Without type information we cannot rule out a LOB, so leave it to DuckDB.
+		if (col_idx >= oracle_types.size() || col_idx >= duck_types.size() ||
+		    !CanPushFilterOnColumn(oracle_types[col_idx], duck_types[col_idx])) {
 			continue;
 		}
 		const auto &col_name = names[col_idx];
