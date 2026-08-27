@@ -2,8 +2,40 @@
 
 ## Unreleased
 
+### Fixes
+
+- **Filters are now actually pushed into Oracle when a database is attached.**
+  `ATTACH ... (TYPE oracle)` used the scan function *without* the filter-pushdown
+  capability, so DuckDB never handed it a `WHERE` clause: `WHERE id = 5` fetched
+  the entire table and filtered locally. Only the `oracle_scan_pushdown` table
+  function and `oracle_attach(..., filter_pushdown=true)` ever pushed anything.
+  The `ora_experimental_filter_pushdown` setting was documented but read nowhere;
+  it now selects the capability as described.
+- Never push a filter on a column Oracle cannot compare: a `CLOB`/`NCLOB`/`LONG`
+  or `BLOB` raises `ORA-22848: cannot use CLOB type as comparison key`, and `JSON`,
+  `VECTOR` and `SDO_GEOMETRY` are read through a server-side serialization whose
+  result is not comparable to the stored value. Such predicates stay in DuckDB.
+  This matters for ordinary tables: a DuckDB `VARCHAR` column created through this
+  extension *is* an Oracle `CLOB`.
+- Do not drop untranslatable branches of an `OR` filter. Unlike `AND` - where
+  dropping a conjunct only widens the predicate and DuckDB filters the remainder -
+  dropping a disjunct narrows it, and DuckDB removes a filter it considers fully
+  pushed down, so the missing rows would never come back. The whole `OR` is now
+  left to DuckDB unless every branch translates.
+
 ### Performance
 
+- **Read partitioned tables in parallel**: each partition becomes a work unit on
+  its own Oracle connection, so a partitioned table is no longer scanned by a
+  single thread. Partitions are disjoint and cover the table, so the result is
+  identical to a serial read — no extra privileges are needed. Where the user may
+  read the current SCN, all work units are pinned to one snapshot
+  (`AS OF SCN`); otherwise the scan still runs, just without that guarantee.
+  Turn it off with `SET ora_parallel_scan = false`. This only *reads* a split that
+  already exists: the extension never creates partitions (its `CREATE TABLE` emits
+  no `PARTITION BY`), and a table that is not partitioned — including on editions
+  without Oracle's separately licensed Partitioning option — is read as a whole
+  exactly as before.
 - Report Oracle's row count to DuckDB's optimizer, so it can pick sensible join
   orders instead of guessing. Tables without optimizer statistics now report
   *unknown* rather than "0 rows", which previously made them look empty.

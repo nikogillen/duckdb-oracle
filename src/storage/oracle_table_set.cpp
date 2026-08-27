@@ -250,6 +250,59 @@ WHERE m.owner = :owner AND m.table_name = :table_name
 	return result;
 }
 
+vector<string> OracleTableSet::GetPartitionNames(ClientContext &context,
+                                                   OracleConnection &connection,
+                                                   const string &schema_name,
+                                                   const string &table_name) {
+	vector<string> partitions;
+	try {
+		// Skip partitions without a segment: those are deferred and hold no rows.
+		// PARTITION_POSITION is the stable ordering; the name is not (interval
+		// partitions are auto-named SYS_P###, which changes on partition maintenance),
+		// so callers must not cache these names beyond a single scan.
+		const char *query = R"(
+SELECT partition_name
+FROM all_tab_partitions
+WHERE table_owner = :owner
+  AND table_name  = :table_name
+  AND (segment_created IS NULL OR segment_created <> 'NO')
+ORDER BY partition_position
+)";
+		const unordered_map<string, string> binds = {
+		    {"owner", StringUtil::Upper(schema_name)},
+		    {"table_name", StringUtil::Upper(table_name)}};
+		auto result = connection.Query(context, query, binds);
+		if (!result) {
+			return partitions;
+		}
+		for (idx_t row = 0; row < result->Count(); row++) {
+			if (!result->IsNull(row, 0)) {
+				partitions.push_back(result->GetString(row, 0));
+			}
+		}
+	} catch (...) {
+		// Not partitioned, no access to the view, or any other problem: fall back to
+		// scanning the table as a whole.
+		partitions.clear();
+	}
+	return partitions;
+}
+
+uint64_t OracleTableSet::GetCurrentSCN(ClientContext &context, OracleCatalog &catalog) {
+	try {
+		auto pool_conn = catalog.GetConnectionPool().GetConnection();
+		auto result = pool_conn.GetConnection().Query(
+		    context, "SELECT TO_CHAR(current_scn) FROM v$database");
+		if (result && result->Count() > 0 && !result->IsNull(0, 0)) {
+			return (uint64_t)std::stoull(result->GetString(0, 0));
+		}
+	} catch (...) {
+		// Reading the SCN needs privileges a plain reader usually does not have.
+		// Without it the partitions are still scanned, just not from one snapshot.
+	}
+	return 0;
+}
+
 void OracleTableSet::AddColumn(OracleResult &result, idx_t row,
                                 OracleTableInfo &table_info,
                                 const case_insensitive_map_t<int64_t> *srid_map) {

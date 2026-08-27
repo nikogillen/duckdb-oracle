@@ -52,9 +52,21 @@ unique_ptr<BaseStatistics> OracleTableEntry::GetStatistics(ClientContext &contex
 
 TableFunction OracleTableEntry::GetScanFunction(ClientContext &context,
                                                   unique_ptr<FunctionData> &bind_data) {
-	OracleScanFunction fun;
 	auto result = make_uniq<OracleBindData>();
 	auto &catalog = this->catalog.Cast<OracleCatalog>();
+
+	// Without filter pushdown Oracle sends every row and DuckDB discards most of
+	// them locally, so `WHERE id = 5` still transfers the whole table. The scan
+	// function only receives DuckDB's filters when it advertises the capability,
+	// hence the two variants.
+	Value pushdown_setting;
+	bool filter_pushdown =
+	    !context.TryGetCurrentSetting("ora_experimental_filter_pushdown", pushdown_setting) ||
+	    pushdown_setting.IsNull() || BooleanValue::Get(pushdown_setting);
+	// Both variants only set flags on TableFunction and add no members of their own,
+	// so assigning to the base is intentional and loses nothing.
+	TableFunction fun = filter_pushdown ? static_cast<TableFunction>(OracleScanFunctionFilterPushdown())
+	                                    : static_cast<TableFunction>(OracleScanFunction());
 
 	result->dsn = catalog.connection_string;
 	result->attach_path = catalog.attach_path;
@@ -65,6 +77,32 @@ TableFunction OracleTableEntry::GetScanFunction(ClientContext &context,
 	result->requires_materialization = false;
 	result->can_use_main_thread = true;
 	result->max_threads = 1;
+
+	// A partitioned table can be read one partition per thread: the partitions are
+	// disjoint and cover the table, so this needs no extra privileges and stays
+	// exactly correct. Non-partitioned tables keep the single-unit scan.
+	Value parallel_setting;
+	bool parallel_scan =
+	    !context.TryGetCurrentSetting("ora_parallel_scan", parallel_setting) ||
+	    parallel_setting.IsNull() || BooleanValue::Get(parallel_setting);
+	if (!is_view && parallel_scan) {
+		try {
+			auto pool_conn = catalog.GetConnectionPool().GetConnection();
+			result->scan_partitions = OracleTableSet::GetPartitionNames(
+			    context, pool_conn.GetConnection(), oracle_schema_name, this->name);
+		} catch (...) {
+			result->scan_partitions.clear();
+		}
+		if (result->scan_partitions.size() > 1) {
+			result->max_threads = result->scan_partitions.size();
+			// Each thread opens its own Oracle connection, so the shared main-thread
+			// connection cannot be reused here.
+			result->can_use_main_thread = false;
+			result->snapshot_scn = OracleTableSet::GetCurrentSCN(context, catalog);
+		} else {
+			result->scan_partitions.clear();
+		}
+	}
 
 	for (auto &col : columns.Logical()) {
 		result->names.push_back(col.GetName());
