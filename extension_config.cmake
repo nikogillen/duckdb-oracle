@@ -7,6 +7,7 @@ duckdb_extension_load(oracle
     LOAD_TESTS
 )
 
-duckdb_extension_load(tpch)
-duckdb_extension_load(tpcds)
+# json is used by the integration tests (json_extract_string on Oracle JSON columns).
+# tpch/tpcds came from the extension template and are not used anywhere in this repo -
+# building their data generators cost CI time for nothing.
 duckdb_extension_load(json)
