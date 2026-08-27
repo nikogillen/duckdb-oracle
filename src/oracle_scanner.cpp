@@ -227,6 +227,18 @@ struct OracleGlobalState : public GlobalTableFunctionState {
 	bool used_main_thread;
 	unique_ptr<ColumnDataCollection> collection;
 	ColumnDataScanState scan_state;
+	//! Index of the next partition to hand out (see bind_data.scan_partitions).
+	idx_t next_partition = 0;
+
+	//! Claim the next partition for a worker. Returns false once all are taken.
+	bool TryClaimPartition(const OracleBindData &bind_data, string &partition_name) {
+		lock_guard<mutex> l(lock);
+		if (next_partition >= bind_data.scan_partitions.size()) {
+			return false;
+		}
+		partition_name = bind_data.scan_partitions[next_partition++];
+		return true;
+	}
 
 	OracleConnection &GetConnection() {
 		return connection;
@@ -269,7 +281,8 @@ void OracleBindData::SetTable(OracleTableEntry &table) {
 // ---------------------------------------------------------------------------
 
 static void OracleInitInternal(ClientContext &context, const OracleBindData &bind_data,
-                                OracleLocalState &lstate) {
+                                OracleLocalState &lstate,
+                                const string &partition_name = string()) {
 	// Column names for SQL generation. Both oracle_names and names are stored
 	// lower-cased (the dictionary load queries apply LOWER(...)); QuoteIdentifier
 	// re-applies Oracle's unquoted-identifier up-casing before quoting, so either
@@ -332,6 +345,17 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 		                           col_names,
 		                           OracleUtils::QuoteIdentifier(bind_data.schema_name),
 		                           OracleUtils::QuoteIdentifier(bind_data.table_name));
+		if (!partition_name.empty()) {
+			// Restrict this work unit to one partition. The name comes from the data
+			// dictionary in Oracle's original spelling, so quote it as-is; it also
+			// cannot be a bind variable, hence the inline (escaped) identifier.
+			query += " PARTITION (" + OracleUtils::QuoteIdentifierAsIs(partition_name) + ")";
+			if (bind_data.snapshot_scn > 0) {
+				// Pin every partition to the same SCN: the work units run on separate
+				// connections, which would otherwise each read their own snapshot.
+				query += " AS OF SCN " + to_string(bind_data.snapshot_scn);
+			}
+		}
 	}
 
 	if (!filter_string.empty()) {
@@ -493,7 +517,18 @@ GetLocalState(ClientContext &context, TableFunctionInitInput &input,
 		local_state->no_connection = true;
 		return std::move(local_state);
 	}
-	OracleInitInternal(context, bind_data, *local_state);
+	if (!bind_data.scan_partitions.empty()) {
+		// Partitioned scan: take the first work unit, or stop right away if another
+		// worker already claimed the last partition.
+		string partition_name;
+		if (!gstate.TryClaimPartition(bind_data, partition_name)) {
+			local_state->done = true;
+			return std::move(local_state);
+		}
+		OracleInitInternal(context, bind_data, *local_state, partition_name);
+	} else {
+		OracleInitInternal(context, bind_data, *local_state);
+	}
 	return std::move(local_state);
 }
 
@@ -510,19 +545,32 @@ OracleInitLocalState(ExecutionContext &context, TableFunctionInitInput &input,
 
 void OracleLocalState::ScanChunk(ClientContext &context, const OracleBindData &bind_data,
                                    OracleGlobalState &gstate, DataChunk &output) {
-	if (done) {
-		return;
-	}
-	if (!reader) {
-		reader = make_uniq<OracleReader>(connection, column_ids, bind_data, rowid_registry);
-	}
-	if (!exec) {
-		reader->BeginQuery(context, sql);
-		exec = true;
-	}
-	auto read_result = reader->Read(output);
-	if (read_result == OracleReadResult::FINISHED) {
-		done = true;
+	while (!done) {
+		if (!reader) {
+			reader =
+			    make_uniq<OracleReader>(connection, column_ids, bind_data, rowid_registry);
+		}
+		if (!exec) {
+			reader->BeginQuery(context, sql);
+			exec = true;
+		}
+		auto read_result = reader->Read(output);
+		if (read_result != OracleReadResult::FINISHED) {
+			return;
+		}
+		// This work unit is exhausted. With a partitioned table there may be more
+		// partitions than threads, so pick up the next one instead of finishing.
+		string next_partition;
+		if (output.size() > 0 || !gstate.TryClaimPartition(bind_data, next_partition)) {
+			// Either we produced rows (report them first and continue next call) or
+			// there is nothing left to do.
+			if (output.size() == 0) {
+				done = true;
+			}
+			return;
+		}
+		reader.reset();
+		OracleInitInternal(context, bind_data, *this, next_partition);
 	}
 }
 

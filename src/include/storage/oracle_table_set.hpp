@@ -18,6 +18,19 @@ class OracleSchemaEntry;
 
 class OracleTableSet : public OracleInSchemaSet {
 public:
+	//! Names of the table's partitions in original Oracle spelling, ordered by
+	//! partition position. Empty when the table is not partitioned, when the
+	//! metadata is unavailable, or on any error.
+	static vector<string> GetPartitionNames(ClientContext &context,
+	                                         OracleConnection &connection,
+	                                         const string &schema_name,
+	                                         const string &table_name);
+
+	//! Current system change number, so parallel work units can read one snapshot.
+	//! Returns 0 when the connected user may not read it (the common case: it needs
+	//! SELECT on V$DATABASE or EXECUTE on DBMS_FLASHBACK).
+	static uint64_t GetCurrentSCN(ClientContext &context, OracleCatalog &catalog);
+
 	explicit OracleTableSet(OracleSchemaEntry &schema);
 
 public:
@@ -74,6 +87,7 @@ protected:
 	static void AddColumn(OracleResult &result, idx_t row,
 	                       OracleTableInfo &table_info,
 	                       const case_insensitive_map_t<int64_t> *srid_map = nullptr);
+
 
 private:
 	string GetAlterTablePrefix(ClientContext &context, OracleTransaction &transaction,

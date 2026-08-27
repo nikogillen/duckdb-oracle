@@ -25,6 +25,42 @@ INSERT INTO t_feat VALUES (1, '{"name":"Alice","tags":["x","y"]}', TO_VECTOR('[1
 INSERT INTO t_feat VALUES (2, '{"nested":{"k":true}}', TO_VECTOR('[-0.25, 10, 0]'));
 COMMIT;
 
+-- Fixture for the parallel (partition-per-thread) scan.
+--
+-- Oracle Partitioning is a separately licensed Enterprise Edition option and is
+-- not available everywhere (Standard Edition 2 has no partitioning at all). If
+-- the partitioned CREATE fails, fall back to an ordinary table: integration.sql
+-- asserts that the parallel and the serial read agree, which holds either way --
+-- on a plain table both simply take the serial path.
+BEGIN
+  EXECUTE IMMEDIATE 'DROP TABLE t_part';
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+SET SERVEROUTPUT ON
+DECLARE
+  cols  VARCHAR2(200) := 't_part (id NUMBER(10), grp NUMBER(4), val VARCHAR2(50))';
+  parts VARCHAR2(60)  := ' PARTITION BY HASH (id) PARTITIONS 8';
+BEGIN
+  BEGIN
+    EXECUTE IMMEDIATE 'CREATE TABLE ' || cols || parts;
+    DBMS_OUTPUT.PUT_LINE('t_part: partitioned, parallel scan path is exercised');
+  EXCEPTION WHEN OTHERS THEN
+    -- No Partitioning option on this database: plain table instead. Reported so a
+    -- silent degradation (e.g. a typo in the DDL above) is visible in the log
+    -- instead of quietly turning the parallel assertions into a serial no-op.
+    EXECUTE IMMEDIATE 'CREATE TABLE ' || cols;
+    DBMS_OUTPUT.PUT_LINE('t_part: NOT partitioned (' || SQLERRM ||
+                         ') -- parallel scan path is NOT exercised');
+  END;
+  -- Dynamic as well: the table above is created at run time, so a static INSERT
+  -- would not compile in this block.
+  EXECUTE IMMEDIATE q'[INSERT INTO t_part SELECT LEVEL, MOD(LEVEL, 10),
+                       'v' || LEVEL FROM dual CONNECT BY LEVEL <= 20000]';
+  COMMIT;
+END;
+/
+
 -- Spatial fixture. Wrapped so the whole block is skipped on databases without
 -- Oracle Spatial (SDO_GEOMETRY/MDSYS missing) instead of failing the setup.
 DECLARE

@@ -84,6 +84,9 @@ public:
 
 	//! Quote an Oracle identifier with double quotes
 	static string QuoteIdentifier(const string &text);
+	//! Quote a name that is already in Oracle's original spelling (e.g. a partition
+	//! name read from the data dictionary) without up-casing it first.
+	static string QuoteIdentifierAsIs(const string &text);
 
 	//! Get the ODPI-C global context (created once per process)
 	static dpiContext *GetOrCreateContext();

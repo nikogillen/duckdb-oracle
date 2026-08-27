@@ -433,6 +433,19 @@ LogicalType OracleUtils::ToOracleType(const LogicalType &input) {
 	}
 }
 
+string OracleUtils::QuoteIdentifierAsIs(const string &text) {
+	string result = "\"";
+	for (char c : text) {
+		if (c == '"') {
+			result += "\"\"";
+		} else {
+			result += c;
+		}
+	}
+	result += "\"";
+	return result;
+}
+
 string OracleUtils::QuoteIdentifier(const string &text) {
 	// The catalog stores every identifier folded to lower case (the load queries use
 	// LOWER(owner/table_name/column_name)). Historically the generated SQL left names

@@ -46,6 +46,13 @@ public:
 	bool read_only = true;
 	bool use_transaction = true;
 	idx_t max_threads = 1;
+	//! Partitions to scan in parallel, one work unit each (empty = scan the whole
+	//! table in a single unit). Names come from the data dictionary in Oracle's
+	//! original spelling and are quoted verbatim, never upper-cased.
+	vector<string> scan_partitions;
+	//! SCN all partition scans are pinned to, so the separate connections read one
+	//! consistent snapshot. 0 when the connected user may not read the current SCN.
+	uint64_t snapshot_scn = 0;
 
 public:
 	void SetCatalog(OracleCatalog &catalog);

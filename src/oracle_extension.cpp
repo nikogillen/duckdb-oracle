@@ -175,6 +175,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("ora_experimental_filter_pushdown",
 	                           "Enable WHERE clause filter pushdown",
 	                           LogicalType::BOOLEAN, Value::BOOLEAN(true));
+	config.AddExtensionOption("ora_parallel_scan",
+	                           "Read partitioned Oracle tables with one connection per "
+	                           "partition",
+	                           LogicalType::BOOLEAN, Value::BOOLEAN(true));
 
 	// Optimizer
 	OptimizerExtension oracle_optimizer;
