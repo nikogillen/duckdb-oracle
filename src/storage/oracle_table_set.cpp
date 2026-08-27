@@ -29,7 +29,7 @@ string OracleTableSet::GetColumnsQuery() {
 	//          table_type(9), column_id(10)
 	// Bind :owner and :table_name before executing.
 	return R"(
-SELECT LOWER(c.owner), LOWER(c.table_name), NVL(t.num_rows, 0) AS num_rows,
+SELECT LOWER(c.owner), LOWER(c.table_name), t.num_rows AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'BASE TABLE' AS table_type, c.column_id
 FROM all_tab_columns c
@@ -37,7 +37,7 @@ JOIN all_tables t ON t.owner = c.owner AND t.table_name = c.table_name
 WHERE c.owner      = :owner
   AND c.table_name = :table_name
 UNION ALL
-SELECT LOWER(c.owner), LOWER(c.table_name), 0 AS num_rows,
+SELECT LOWER(c.owner), LOWER(c.table_name), CAST(NULL AS NUMBER) AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'VIEW' AS table_type, c.column_id
 FROM all_tab_columns c
@@ -83,14 +83,14 @@ ORDER BY 1
 string OracleTableSet::GetUserColumnsQuery() {
 	// Same column layout as GetColumnsQuery(). Bind :table_name only.
 	return R"(
-SELECT LOWER(USER) AS owner, LOWER(c.table_name), NVL(t.num_rows, 0) AS num_rows,
+SELECT LOWER(USER) AS owner, LOWER(c.table_name), t.num_rows AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'BASE TABLE' AS table_type, c.column_id
 FROM user_tab_columns c
 JOIN user_tables t ON t.table_name = c.table_name
 WHERE c.table_name = :table_name
 UNION ALL
-SELECT LOWER(USER) AS owner, LOWER(c.table_name), 0 AS num_rows,
+SELECT LOWER(USER) AS owner, LOWER(c.table_name), CAST(NULL AS NUMBER) AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'VIEW' AS table_type, c.column_id
 FROM user_tab_columns c
@@ -132,7 +132,7 @@ ORDER BY 1
 string OracleTableSet::GetDbaColumnsQuery() {
 	// Same 11-column layout as GetColumnsQuery(). Bind :owner and :table_name.
 	return R"(
-SELECT LOWER(c.owner), LOWER(c.table_name), NVL(tbl.num_rows, 0) AS num_rows,
+SELECT LOWER(c.owner), LOWER(c.table_name), tbl.num_rows AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'BASE TABLE' AS table_type, c.column_id
 FROM dba_tab_columns c
@@ -141,7 +141,7 @@ LEFT JOIN dba_tables tbl
 WHERE c.owner      = :owner
   AND c.table_name = :table_name
 UNION ALL
-SELECT LOWER(c.owner), LOWER(c.table_name), 0 AS num_rows,
+SELECT LOWER(c.owner), LOWER(c.table_name), CAST(NULL AS NUMBER) AS num_rows,
        LOWER(c.column_name), c.data_type, c.data_length, c.data_precision, c.data_scale,
        c.nullable, 'VIEW' AS table_type, c.column_id
 FROM dba_tab_columns c
