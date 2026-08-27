@@ -66,6 +66,32 @@ TableFunction OracleTableEntry::GetScanFunction(ClientContext &context,
 	result->can_use_main_thread = true;
 	result->max_threads = 1;
 
+	// A partitioned table can be read one partition per thread: the partitions are
+	// disjoint and cover the table, so this needs no extra privileges and stays
+	// exactly correct. Non-partitioned tables keep the single-unit scan.
+	Value parallel_setting;
+	bool parallel_scan =
+	    !context.TryGetCurrentSetting("ora_parallel_scan", parallel_setting) ||
+	    parallel_setting.IsNull() || BooleanValue::Get(parallel_setting);
+	if (!is_view && parallel_scan) {
+		try {
+			auto pool_conn = catalog.GetConnectionPool().GetConnection();
+			result->scan_partitions = OracleTableSet::GetPartitionNames(
+			    context, pool_conn.GetConnection(), oracle_schema_name, this->name);
+		} catch (...) {
+			result->scan_partitions.clear();
+		}
+		if (result->scan_partitions.size() > 1) {
+			result->max_threads = result->scan_partitions.size();
+			// Each thread opens its own Oracle connection, so the shared main-thread
+			// connection cannot be reused here.
+			result->can_use_main_thread = false;
+			result->snapshot_scn = OracleTableSet::GetCurrentSCN(context, catalog);
+		} else {
+			result->scan_partitions.clear();
+		}
+	}
+
 	for (auto &col : columns.Logical()) {
 		result->names.push_back(col.GetName());
 		result->types.push_back(col.GetType());

@@ -38,7 +38,8 @@ SELECT * FROM ora.hr.employees LIMIT 10;
   `BOOLEAN`, plus Oracle **23ai** `JSON` → DuckDB `JSON` and `VECTOR` → `LIST(FLOAT)`.
 - 🗺️ **Spatial**: `SDO_GEOMETRY` → DuckDB `GEOMETRY`, SRID preserved as CRS.
 - 🔑 **Oracle Wallet / tnsnames.ora** via `config_dir` (TNS_ADMIN).
-- ⚡ Fast bulk inserts (ODPI-C array binding), connection pooling, prefetch tuning.
+- ⚡ Fast bulk inserts (ODPI-C array binding), **parallel reads of partitioned
+  tables**, connection pooling, prefetch tuning.
 
 ## Not supported / limitations
 
@@ -322,6 +323,7 @@ FROM ora.app.items;
 | `ora_connection_limit` | `64` | Max concurrent Oracle connections in the pool |
 | `ora_connection_cache` | `true` | Keep connections alive between queries |
 | `ora_experimental_filter_pushdown` | `true` | Push `WHERE` filters into Oracle |
+| `ora_parallel_scan` | `true` | Read partitioned tables with one connection per partition |
 | `ora_debug_show_queries` | `false` | Print every Oracle SQL statement to stdout ⚠️ prints data |
 
 ```sql

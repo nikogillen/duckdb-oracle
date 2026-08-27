@@ -98,6 +98,18 @@ SELECT 1 AS id,
 SELECT big_dec, d, ts, unicode_text FROM ora.demo.dck_types;
 DROP TABLE ora.demo.dck_types;
 
+-- Parallel scan: a partitioned table is read one partition per connection. The
+-- results must be identical to a serial read - no duplicated and no missing rows.
+SELECT count(*) AS part_rows, sum(id) AS part_checksum, count(DISTINCT id) AS part_unique,
+       min(id) AS part_min, max(id) AS part_max
+FROM ora.demo.t_part;
+-- Same table with the parallel path disabled, as a cross-check.
+SET ora_parallel_scan = false;
+SELECT count(*) AS serial_rows, sum(id) AS serial_checksum FROM ora.demo.t_part;
+SET ora_parallel_scan = true;
+-- Filters still apply per partition.
+SELECT count(*) AS part_filtered FROM ora.demo.t_part WHERE id <= 100;
+
 -- Spatial (SDO_GEOMETRY) is covered by integration_spatial.sql, which the runner
 -- executes only when the database has Oracle Spatial.
 SELECT 'ALL INTEGRATION TESTS PASSED' AS result;

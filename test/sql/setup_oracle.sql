@@ -25,6 +25,17 @@ INSERT INTO t_feat VALUES (1, '{"name":"Alice","tags":["x","y"]}', TO_VECTOR('[1
 INSERT INTO t_feat VALUES (2, '{"nested":{"k":true}}', TO_VECTOR('[-0.25, 10, 0]'));
 COMMIT;
 
+-- Partitioned fixture for the parallel (partition-per-thread) scan.
+BEGIN
+  EXECUTE IMMEDIATE 'DROP TABLE t_part';
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+/
+CREATE TABLE t_part (id NUMBER(10), grp NUMBER(4), val VARCHAR2(50))
+PARTITION BY HASH (id) PARTITIONS 8;
+INSERT INTO t_part SELECT LEVEL, MOD(LEVEL,10), 'v'||LEVEL FROM dual CONNECT BY LEVEL <= 20000;
+COMMIT;
+
 -- Spatial fixture. Wrapped so the whole block is skipped on databases without
 -- Oracle Spatial (SDO_GEOMETRY/MDSYS missing) instead of failing the setup.
 DECLARE

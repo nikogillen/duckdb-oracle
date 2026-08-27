@@ -4,6 +4,13 @@
 
 ### Performance
 
+- **Read partitioned tables in parallel**: each partition becomes a work unit on
+  its own Oracle connection, so a partitioned table is no longer scanned by a
+  single thread. Partitions are disjoint and cover the table, so the result is
+  identical to a serial read — no extra privileges are needed. Where the user may
+  read the current SCN, all work units are pinned to one snapshot
+  (`AS OF SCN`); otherwise the scan still runs, just without that guarantee.
+  Turn it off with `SET ora_parallel_scan = false`.
 - Report Oracle's row count to DuckDB's optimizer, so it can pick sensible join
   orders instead of guessing. Tables without optimizer statistics now report
   *unknown* rather than "0 rows", which previously made them look empty.
