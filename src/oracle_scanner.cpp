@@ -87,6 +87,23 @@ public:
 				}
 			}
 		}
+
+		// Size the fetch array by memory, not by row count: ODPI-C allocates
+		// arraySize * clientSizeInBytes per column, so a fixed row count explodes on
+		// wide tables (2000 rows x VARCHAR2(4000) in UTF-8 is ~31 MB for one column).
+		// Now that the column widths are known, cap the whole buffer.
+		uint64_t row_width = 0;
+		for (uint32_t i = 0; i < num_cols; i++) {
+			auto width = col_info[i].typeInfo.clientSizeInBytes;
+			// LOBs and the like are fetched by locator and cost little per row.
+			row_width += width > 0 ? width : 8;
+		}
+		if (row_width > 0) {
+			uint64_t budget_rows = FETCH_BUFFER_BUDGET_BYTES / row_width;
+			auto array_size = MinValue<uint64_t>(
+			    FETCH_ARRAY_SIZE, MaxValue<uint64_t>(budget_rows, MIN_FETCH_ARRAY_SIZE));
+			dpiStmt_setFetchArraySize(stmt, (uint32_t)array_size);
+		}
 	}
 
 	OracleReadResult Read(DataChunk &output) {
@@ -171,6 +188,10 @@ private:
 	vector<dpiQueryInfo> col_info;
 	bool done = false;
 	static constexpr uint32_t FETCH_ARRAY_SIZE = 2000;
+	//! Never fetch fewer rows than this, however wide the row is.
+	static constexpr uint32_t MIN_FETCH_ARRAY_SIZE = 64;
+	//! Upper bound for the define buffers of a single scan (see BeginQuery).
+	static constexpr uint64_t FETCH_BUFFER_BUDGET_BYTES = 16ULL * 1024 * 1024;
 };
 
 // ---------------------------------------------------------------------------
@@ -270,6 +291,17 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 			// converter turns that into GEOMETRY (1.5+) or leaves it as WKT text.
 			col_names += "SDO_UTIL.TO_WKTGEOMETRY(" +
 			             OracleUtils::QuoteIdentifier(sql_names[column_id]) + ")";
+		} else if (column_id < bind_data.oracle_types.size() &&
+		           bind_data.oracle_types[column_id].info ==
+		               OracleTypeAnnotation::JSON_AS_JSON) {
+			// Have Oracle serialize JSON to text. Fetching the native JSON type
+			// requires an Oracle client of 21c or newer; with a 19c client the column
+			// would arrive as raw OSON in a BLOB and never reach the JSON converter.
+			// JSON_SERIALIZE exists since 19c and works for JSON columns, JSON
+			// collection tables and duality views alike.
+			col_names += "JSON_SERIALIZE(" +
+			             OracleUtils::QuoteIdentifier(sql_names[column_id]) +
+			             " RETURNING CLOB)";
 		} else {
 			col_names += OracleUtils::QuoteIdentifier(sql_names[column_id]);
 		}
@@ -281,10 +313,23 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 	string query;
 	if (bind_data.table_name.empty()) {
 		D_ASSERT(!bind_data.sql.empty());
+		// User-supplied SQL: pass it through untouched, no hints.
 		query = StringUtil::Format("SELECT %s FROM (%s) __ora_sub", col_names,
 		                           bind_data.sql);
 	} else {
-		query = StringUtil::Format("SELECT %s FROM %s.%s", col_names,
+		// Two purely defensive hints:
+		//   ALL_ROWS        - the optimizer default, but sites do set FIRST_ROWS_10 in a
+		//                     logon trigger, which would pick an index plan with
+		//                     single-block reads for a full extract.
+		//   NO_RESULT_CACHE - a single result is capped at a small fraction of the
+		//                     result cache, so under RESULT_CACHE_MODE=FORCE the server
+		//                     would build and discard a cache entry per scan, and
+		//                     serialize on the result cache latch.
+		// Deliberately no FULL/NO_PARALLEL: a selective pushed-down filter is better
+		// served by an index, and server-side parallelism still helps while the scan
+		// itself is single-threaded.
+		query = StringUtil::Format("SELECT /*+ ALL_ROWS NO_RESULT_CACHE */ %s FROM %s.%s",
+		                           col_names,
 		                           OracleUtils::QuoteIdentifier(bind_data.schema_name),
 		                           OracleUtils::QuoteIdentifier(bind_data.table_name));
 	}
@@ -530,11 +575,25 @@ static BindInfo OracleGetBindInfo(const optional_ptr<FunctionData> bind_data_p) 
 // Function registration
 // ---------------------------------------------------------------------------
 
+//! Report the table's row count to the optimizer so it can pick sensible join
+//! orders. approx_num_rows comes from Oracle's optimizer statistics and is 0 when
+//! the table has never been analyzed — report nothing in that case rather than
+//! claiming the table is empty.
+static unique_ptr<NodeStatistics> OracleCardinality(ClientContext &context,
+                                                     const FunctionData *bind_data_p) {
+	auto &bind_data = bind_data_p->Cast<OracleBindData>();
+	if (bind_data.approx_num_rows == 0) {
+		return nullptr;
+	}
+	return make_uniq<NodeStatistics>(bind_data.approx_num_rows);
+}
+
 OracleScanFunction::OracleScanFunction()
     : TableFunction("oracle_scan",
                     {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
                     OracleScan, OracleBind, OracleInitGlobalState,
                     OracleInitLocalState) {
+	cardinality = OracleCardinality;
 	to_string = OracleScanToString;
 	serialize = OracleScanSerialize;
 	deserialize = OracleScanDeserialize;
@@ -548,6 +607,7 @@ OracleScanFunctionFilterPushdown::OracleScanFunctionFilterPushdown()
                     {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR},
                     OracleScan, OracleBind, OracleInitGlobalState,
                     OracleInitLocalState) {
+	cardinality = OracleCardinality;
 	to_string = OracleScanToString;
 	serialize = OracleScanSerialize;
 	deserialize = OracleScanDeserialize;

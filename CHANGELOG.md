@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Performance
+
+- Report Oracle's row count to DuckDB's optimizer, so it can pick sensible join
+  orders instead of guessing. Tables without optimizer statistics now report
+  *unknown* rather than "0 rows", which previously made them look empty.
+- Bound the fetch buffer by memory instead of a fixed row count. ODPI-C allocates
+  `rows x column width`, so 2000 rows of a `VARCHAR2(4000)` column reserved ~31 MB
+  for a single column (hundreds of MB on wide tables); the buffer is now capped.
+- Add two defensive optimizer hints (`ALL_ROWS`, `NO_RESULT_CACHE`) to generated
+  scans, protecting against sites that set `FIRST_ROWS` in a logon trigger or run
+  with `RESULT_CACHE_MODE=FORCE`.
+
 ### Features
 
 - **Oracle Spatial**: `SDO_GEOMETRY` columns are now read as DuckDB `GEOMETRY`
@@ -32,6 +44,11 @@
 
 ### Fixes
 
+- Read Oracle `JSON` columns through `JSON_SERIALIZE` instead of the native JSON
+  fetch. The native type requires an Oracle client of 21c or newer; with a 19c
+  client — the documented minimum — the column arrived as raw OSON in a BLOB and
+  never produced usable JSON. This also covers JSON collection tables and
+  duality views, which expose their content the same way.
 - Fix silent precision loss on `DECIMAL` reads: Oracle `NUMBER` values were routed
   through `double` and an intermediate `int64`, corrupting values with more than
   ~15 significant digits (a `DECIMAL(38,10)` could come back as a completely
