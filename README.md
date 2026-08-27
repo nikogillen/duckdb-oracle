@@ -330,6 +330,30 @@ FROM ora.app.items;
 SET ora_debug_show_queries = true;
 ```
 
+### A note on `ora_parallel_scan` and Oracle Partitioning
+
+Oracle **Partitioning is a separately licensed option** of Enterprise Edition —
+it is not part of Standard Edition 2. The extension therefore **never creates
+partitions**: its `CREATE TABLE` emits columns and constraints only, and there is
+no way to make it produce a `PARTITION BY` clause.
+
+It only ever *reads* a split that already exists. Before a scan it asks the data
+dictionary which partitions the table has; if the table is not partitioned — or
+the database has no Partitioning option, or the session may not read
+`ALL_TAB_PARTITIONS` — the answer is empty and the table is read as a whole,
+exactly as before. Concretely:
+
+```sql
+-- non-partitioned table
+SELECT /*+ ALL_ROWS NO_RESULT_CACHE */ "ID" FROM "DEMO"."T_EMP"
+-- partitioned table: one statement per partition, run concurrently
+SELECT /*+ ALL_ROWS NO_RESULT_CACHE */ "ID" FROM "DEMO"."T_PART" PARTITION ("P_2024_Q1")
+```
+
+So the feature speeds up databases that are partitioned already and is a silent
+no-op everywhere else. `SET ora_parallel_scan = false` disables the partitioned
+path entirely if you would rather not have it used at all.
+
 ## Building from source
 
 `duckdb` and `extension-ci-tools` are git submodules; ODPI-C is fetched by CMake
