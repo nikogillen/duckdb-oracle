@@ -321,7 +321,8 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 	}
 
 	string filter_string = OracleFilterPushdown::TransformFilters(
-	    lstate.column_ids, lstate.filters, sql_names);
+	    lstate.column_ids, lstate.filters, sql_names, bind_data.oracle_types,
+	    bind_data.types);
 
 	string query;
 	if (bind_data.table_name.empty()) {

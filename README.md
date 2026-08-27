@@ -322,12 +322,45 @@ FROM ora.app.items;
 |--------|---------|-------------|
 | `ora_connection_limit` | `64` | Max concurrent Oracle connections in the pool |
 | `ora_connection_cache` | `true` | Keep connections alive between queries |
-| `ora_experimental_filter_pushdown` | `true` | Push `WHERE` filters into Oracle |
+| `ora_experimental_filter_pushdown` | `true` | Push `WHERE` filters into Oracle (see note below) |
 | `ora_parallel_scan` | `true` | Read partitioned tables with one connection per partition |
 | `ora_debug_show_queries` | `false` | Print every Oracle SQL statement to stdout ⚠️ prints data |
 
 ```sql
 SET ora_debug_show_queries = true;
+```
+
+### What gets pushed into Oracle, and what does not
+
+`WHERE` filters, the column list and `LIMIT` are translated into the Oracle query,
+so Oracle sends fewer rows. Everything else - `GROUP BY`, joins, window functions,
+`ORDER BY` - is computed by DuckDB. That split is deliberate: pushing filters only
+changes *how many* rows travel, while pushing computation would change *who*
+evaluates it, along with the type and `NULL` semantics that come with it.
+
+Filters on `CLOB`/`NCLOB`/`BLOB`, `JSON`, `VECTOR` and `SDO_GEOMETRY` columns are
+never pushed. Oracle rejects a LOB as a comparison key (`ORA-22848`), and the other
+types are read through a server-side serialization whose result is not comparable
+to the stored value. Those predicates are evaluated by DuckDB instead, which costs
+transfer but is always correct. Note this includes DuckDB `VARCHAR` columns created
+through this extension, since those are Oracle `CLOB`s.
+
+For Oracle-specific SQL that DuckDB does not speak - `CONNECT BY`, `MODEL`,
+`MATCH_RECOGNIZE`, flashback queries - use the passthrough and let Oracle run it.
+Note that it takes a **DSN**, not the name of an attached database:
+
+```sql
+SELECT * FROM oracle_query(
+    'user/password@host:1521/service',
+    'SELECT name, lvl FROM emp CONNECT BY PRIOR id = mgr_id');
+```
+
+Today the passthrough returns every column as `VARCHAR` under generic names
+(`column0`, `column1`, ...), so cast and rename on the DuckDB side:
+
+```sql
+SELECT column0 AS name, column1::INTEGER AS lvl
+FROM oracle_query('user/password@host:1521/service', 'SELECT ... ');
 ```
 
 ### A note on `ora_parallel_scan` and Oracle Partitioning
