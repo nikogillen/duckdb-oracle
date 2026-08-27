@@ -8,6 +8,7 @@
 #pragma once
 
 #include "duckdb.hpp"
+#include "oracle_duckdb_compat.hpp"
 #include <dpi.h>
 
 namespace duckdb {
@@ -20,6 +21,7 @@ struct OracleTypeData {
 	int64_t data_scale = -127;   // DATA_SCALE (NUMBER decimal places)
 	int64_t data_length = 0;     // DATA_LENGTH (char/byte length)
 	int64_t char_length = 0;     // CHAR_LENGTH (character length)
+	int64_t srid = 0;            // SDO_GEOMETRY spatial reference id (0 = unknown)
 };
 
 enum class OracleTypeAnnotation {
@@ -32,6 +34,7 @@ enum class OracleTypeAnnotation {
 	TIMESTAMP_WITH_LTZ,    // TIMESTAMP WITH LOCAL TIME ZONE
 	VECTOR_AS_LIST,        // Oracle 23ai VECTOR → LIST(FLOAT)
 	JSON_AS_JSON,          // Oracle native JSON → DuckDB JSON
+	SPATIAL_AS_GEOMETRY,   // Oracle SDO_GEOMETRY → GEOMETRY (1.5+) / WKT VARCHAR (1.4)
 };
 
 struct OracleType {
@@ -59,7 +62,10 @@ struct OracleVersion {
 class OracleUtils {
 public:
 	//! Connect to Oracle using ODPI-C
-	static dpiConn *OraConnect(const string &dsn, const string &attach_path);
+	//! config_dir, when set, is exported as TNS_ADMIN for the duration of the
+	//! connect so Oracle picks up tnsnames.ora/sqlnet.ora and wallets from there.
+	static dpiConn *OraConnect(const string &dsn, const string &attach_path,
+	                            const string &config_dir = string());
 
 	//! Parse DSN string: "user/pass@connect_string"
 	//! OR key-value: "user=xxx password=yyy connectString=//host:port/svc"

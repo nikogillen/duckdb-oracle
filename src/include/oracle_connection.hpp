@@ -38,7 +38,8 @@ public:
 	OracleConnection &operator=(OracleConnection &&) noexcept;
 
 public:
-	static OracleConnection Open(const string &dsn, const string &attach_path);
+	static OracleConnection Open(const string &dsn, const string &attach_path,
+	                              const string &config_dir = string());
 
 	void Execute(optional_ptr<ClientContext> context, const string &query);
 	unique_ptr<OracleResult> TryQuery(optional_ptr<ClientContext> context,

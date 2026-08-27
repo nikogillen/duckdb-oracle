@@ -47,10 +47,11 @@ OracleConnection &OracleConnection::operator=(OracleConnection &&other) noexcept
 	return *this;
 }
 
-OracleConnection OracleConnection::Open(const string &dsn, const string &attach_path) {
+OracleConnection OracleConnection::Open(const string &dsn, const string &attach_path,
+                                          const string &config_dir) {
 	OracleConnection result;
-	result.connection =
-	    make_shared_ptr<OwnedOracleConnection>(OracleUtils::OraConnect(dsn, attach_path));
+	result.connection = make_shared_ptr<OwnedOracleConnection>(
+	    OracleUtils::OraConnect(dsn, attach_path, config_dir));
 	result.dsn = dsn;
 	return result;
 }

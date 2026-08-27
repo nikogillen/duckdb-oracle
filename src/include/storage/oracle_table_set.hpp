@@ -70,8 +70,10 @@ protected:
 	void AlterTable(ClientContext &context, OracleTransaction &transaction,
 	                RemoveColumnInfo &info);
 
+	//! srid_map optionally supplies SDO_GEOMETRY SRIDs keyed by column name.
 	static void AddColumn(OracleResult &result, idx_t row,
-	                       OracleTableInfo &table_info);
+	                       OracleTableInfo &table_info,
+	                       const case_insensitive_map_t<int64_t> *srid_map = nullptr);
 
 private:
 	string GetAlterTablePrefix(ClientContext &context, OracleTransaction &transaction,

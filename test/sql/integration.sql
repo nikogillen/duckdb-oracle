@@ -58,4 +58,46 @@ SELECT id, json_extract_string(doc, '$.name') AS name FROM ora.demo.t_feat ORDER
 SELECT id, len(emb) AS dims, emb[1] AS first_dim FROM ora.demo.t_feat ORDER BY id;
 SELECT count(*) AS json_ok FROM ora.demo.t_feat WHERE json_extract_string(doc, '$.name') = 'Alice';
 
+-- Bulk insert via ODPI-C array binding: several thousand rows exercise the batch
+-- path (one executeMany per chunk) across the common column types, including NULLs.
+DROP TABLE IF EXISTS ora.demo.dck_bulk;
+CREATE TABLE ora.demo.dck_bulk AS
+SELECT i AS id,
+       'name_' || i AS name,
+       i * 1.5 AS val,
+       CASE WHEN i % 7 = 0 THEN NULL ELSE i % 100 END AS maybe_null
+FROM range(5000) t(i);
+SELECT count(*) AS bulk_rows, sum(id) AS bulk_checksum FROM ora.demo.dck_bulk;
+SELECT count(*) AS bulk_nulls FROM ora.demo.dck_bulk WHERE maybe_null IS NULL;
+SELECT name FROM ora.demo.dck_bulk WHERE id = 4999;
+-- Append into the existing table to exercise INSERT INTO (not just CTAS).
+INSERT INTO ora.demo.dck_bulk SELECT i, 'appended', i, NULL FROM range(5000, 6000) t(i);
+SELECT count(*) AS after_append FROM ora.demo.dck_bulk;
+DROP TABLE ora.demo.dck_bulk;
+
+-- Values the previous literal-based insert could not write at all: strings past
+-- Oracle's 4000-byte literal limit (also exercising the dynamic bind path above
+-- 8 KB) and blobs past the HEXTORAW limit.
+DROP TABLE IF EXISTS ora.demo.dck_big;
+CREATE TABLE ora.demo.dck_big AS
+SELECT 1 AS id, repeat('x', 5000) AS s, repeat('a', 50000)::BLOB AS payload
+UNION ALL
+SELECT 2, repeat('y', 40000), NULL;
+SELECT id, length(s) AS text_len, octet_length(payload) AS blob_len
+FROM ora.demo.dck_big ORDER BY id;
+DROP TABLE ora.demo.dck_big;
+
+-- Remaining bind types round-trip (decimal precision, dates, timestamps, unicode).
+DROP TABLE IF EXISTS ora.demo.dck_types;
+CREATE TABLE ora.demo.dck_types AS
+SELECT 1 AS id,
+       12345678901234567890.1234567890::DECIMAL(38,10) AS big_dec,
+       DATE '2026-03-01' AS d,
+       TIMESTAMP '2026-03-01 12:34:56.654321' AS ts,
+       'Grüße ✓ O''Brien' AS unicode_text;
+SELECT big_dec, d, ts, unicode_text FROM ora.demo.dck_types;
+DROP TABLE ora.demo.dck_types;
+
+-- Spatial (SDO_GEOMETRY) is covered by integration_spatial.sql, which the runner
+-- executes only when the database has Oracle Spatial.
 SELECT 'ALL INTEGRATION TESTS PASSED' AS result;

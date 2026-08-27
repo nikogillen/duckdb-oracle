@@ -39,7 +39,7 @@ docker run -d --name "$CONTAINER" \
   -e ORACLE_PASSWORD="$ORA_PASSWORD" \
   -e APP_USER="$APP_USER" \
   -e APP_USER_PASSWORD="$APP_PASSWORD" \
-  gvenzl/oracle-free:slim >/dev/null
+  gvenzl/oracle-free:latest >/dev/null
 
 echo "==> Waiting for the database to become healthy"
 for _ in $(seq 1 60); do
@@ -61,5 +61,23 @@ LIBPATH_VAR="LD_LIBRARY_PATH"
   echo "ATTACH '$ORA_DSN' AS ora (TYPE oracle);"
   cat "$REPO_ROOT/test/sql/integration.sql"
 } | env "${LIBPATH_VAR}=${IC_DIR:-}" "$DUCKDB_BIN" -unsigned
+
+# Spatial tests need Oracle Spatial; setup_oracle.sql only creates T_GEO when it
+# is available, so use that as the switch.
+if docker exec -i "$CONTAINER" sqlplus -S "$ORA_DSN" <<'SQL' 2>/dev/null | grep -q "T_GEO"
+SET HEADING OFF FEEDBACK OFF
+SELECT table_name FROM user_tables WHERE table_name = 'T_GEO';
+EXIT
+SQL
+then
+  echo "==> Running spatial tests"
+  {
+    echo "LOAD '$EXT_PATH';"
+    echo "ATTACH '$ORA_DSN' AS ora (TYPE oracle);"
+    cat "$REPO_ROOT/test/sql/integration_spatial.sql"
+  } | env "${LIBPATH_VAR}=${IC_DIR:-}" "$DUCKDB_BIN" -unsigned
+else
+  echo "==> Skipping spatial tests (Oracle Spatial not available)"
+fi
 
 echo "==> Done"

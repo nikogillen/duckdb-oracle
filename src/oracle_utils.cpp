@@ -6,6 +6,9 @@
 
 #include <cctype>
 #include <cstring>
+#ifdef _WIN32
+#include "duckdb/common/windows.hpp"
+#endif
 
 namespace duckdb {
 
@@ -87,11 +90,77 @@ void OracleUtils::ParseDSN(const string &dsn, string &user, string &password,
 	}
 }
 
-dpiConn *OracleUtils::OraConnect(const string &dsn, const string &attach_path) {
+// Serializes the TNS_ADMIN environment manipulation below. Oracle resolves
+// tnsnames.ora/sqlnet.ora/wallets from TNS_ADMIN at connect time, and the variable
+// is process-wide — so connects that carry a config directory must not overlap.
+static mutex g_tns_admin_mutex;
+
+// RAII guard that points TNS_ADMIN at `config_dir` for the lifetime of a connect
+// and restores the previous value (or unsets it) afterwards. An empty config_dir
+// leaves the environment untouched.
+class ScopedTnsAdmin {
+public:
+	explicit ScopedTnsAdmin(const string &config_dir) {
+		if (config_dir.empty()) {
+			return;
+		}
+#ifdef _WIN32
+		// Read and write through the same (Win32) environment: it is not kept in
+		// sync with the CRT environment that getenv() sees.
+		char buffer[MAX_PATH];
+		auto length = GetEnvironmentVariableA("TNS_ADMIN", buffer, sizeof(buffer));
+		had_previous = length > 0 && length < sizeof(buffer);
+		if (had_previous) {
+			previous_value.assign(buffer, length);
+		}
+		changed = SetEnvironmentVariableA("TNS_ADMIN", config_dir.c_str()) != 0;
+#else
+		const char *previous = getenv("TNS_ADMIN");
+		had_previous = previous != nullptr;
+		if (had_previous) {
+			previous_value = previous;
+		}
+		changed = setenv("TNS_ADMIN", config_dir.c_str(), 1) == 0;
+#endif
+	}
+
+	~ScopedTnsAdmin() {
+		if (!changed) {
+			return;
+		}
+#ifdef _WIN32
+		SetEnvironmentVariableA("TNS_ADMIN", had_previous ? previous_value.c_str() : nullptr);
+#else
+		if (had_previous) {
+			setenv("TNS_ADMIN", previous_value.c_str(), 1);
+		} else {
+			unsetenv("TNS_ADMIN");
+		}
+#endif
+	}
+
+private:
+	bool changed = false;
+	bool had_previous = false;
+	string previous_value;
+};
+
+dpiConn *OracleUtils::OraConnect(const string &dsn, const string &attach_path,
+                                  const string &config_dir) {
+	// Take the context lock first (inside GetOrCreateContext) and only then the
+	// environment lock, so the two are never acquired in the opposite order.
 	auto context = GetOrCreateContext();
 
 	string user, password, connect_string;
 	ParseDSN(dsn, user, password, connect_string);
+
+	// Hold the lock across the connect even without a config directory: TNS_ADMIN is
+	// process-wide, so a plain connect must not observe another connect's setting.
+	// This serializes connects; acceptable because the pool caches connections, so
+	// connects are rare. (A shared_mutex would let plain connects run in parallel,
+	// but the extension targets C++11.)
+	lock_guard<mutex> env_lock(g_tns_admin_mutex);
+	ScopedTnsAdmin tns_admin(config_dir);
 
 	dpiConn *conn = nullptr;
 	dpiErrorInfo error_info;
@@ -108,6 +177,13 @@ dpiConn *OracleUtils::OraConnect(const string &dsn, const string &attach_path) {
 
 	dpiConnCreateParams conn_params;
 	dpiContext_initConnCreateParams(context, &conn_params);
+
+	// External authentication (Oracle Wallet holding the credentials, "/@alias"):
+	// no user and no password, but a connect string. ODPI-C requires the flag to be
+	// set explicitly and rejects it when credentials are also supplied.
+	if (user.empty() && password.empty() && !connect_string.empty()) {
+		conn_params.externalAuth = 1;
+	}
 
 	if (dpiConn_create(context, user.c_str(), (uint32_t)user.size(), password.c_str(),
 	                   (uint32_t)password.size(), connect_string.c_str(),
@@ -235,9 +311,19 @@ LogicalType OracleUtils::TypeToLogicalType(const OracleTypeData &type_info,
 		oracle_type.info = OracleTypeAnnotation::CAST_TO_VARCHAR;
 		return LogicalType::VARCHAR;
 	} else if (base_type == "SDO_GEOMETRY" || base_type == "MDSYS.SDO_GEOMETRY") {
-		// Oracle Spatial geometry - cast to VARCHAR
-		oracle_type.info = OracleTypeAnnotation::CAST_TO_VARCHAR;
+		// Oracle Spatial: the scan selects SDO_UTIL.TO_WKTGEOMETRY(col), so the value
+		// arrives as WKT text. On DuckDB 1.5+ we surface it as a native GEOMETRY
+		// (with the column's SRID as CRS when known); on 1.4 LTS, which has no
+		// GEOMETRY type, the WKT stays a VARCHAR.
+		oracle_type.info = OracleTypeAnnotation::SPATIAL_AS_GEOMETRY;
+#if ORACLE_HAS_GEOMETRY_TYPE
+		if (type_info.srid > 0) {
+			return LogicalType::GEOMETRY("EPSG:" + to_string(type_info.srid));
+		}
+		return LogicalType::GEOMETRY();
+#else
 		return LogicalType::VARCHAR;
+#endif
 	} else if (base_type == "BOOLEAN") {
 		// Oracle 23c+ BOOLEAN; older Oracle lacks this
 		return LogicalType::BOOLEAN;

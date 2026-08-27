@@ -59,8 +59,8 @@ OraclePoolConnection OracleConnectionPool::GetConnectionInternal(unique_lock<mut
 	lock.unlock();
 	try {
 		return OraclePoolConnection(
-		    this,
-		    OracleConnection::Open(catalog.connection_string, catalog.attach_path));
+		    this, OracleConnection::Open(catalog.connection_string, catalog.attach_path,
+		                                  catalog.config_dir));
 	} catch (...) {
 		// Open() failed before an OraclePoolConnection took ownership, so no destructor
 		// will release the slot we reserved above. Roll back the count to avoid leaking

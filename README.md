@@ -36,16 +36,20 @@ SELECT * FROM ora.hr.employees LIMIT 10;
 - 🔐 **Secrets** for credentials (`CREATE SECRET … TYPE oracle`).
 - 🧬 **Rich types**: `NUMBER`, `TIMESTAMP`/`TIMESTAMP WITH TIME ZONE`, `CLOB`/`BLOB`,
   `BOOLEAN`, plus Oracle **23ai** `JSON` → DuckDB `JSON` and `VECTOR` → `LIST(FLOAT)`.
-- ⚡ Connection pooling, prefetch tuning, client-side health checks.
+- 🗺️ **Spatial**: `SDO_GEOMETRY` → DuckDB `GEOMETRY`, SRID preserved as CRS.
+- 🔑 **Oracle Wallet / tnsnames.ora** via `config_dir` (TNS_ADMIN).
+- ⚡ Fast bulk inserts (ODPI-C array binding), connection pooling, prefetch tuning.
 
 ## Not supported / limitations
 
-- **Read-focused for advanced types:** `JSON` and `VECTOR` are read-only; writing
-  them back is not supported.
+- **Read-focused for advanced types:** `JSON`, `VECTOR` and `SDO_GEOMETRY` are
+  read-only; writing them back is not supported.
 - **Vectors:** only *dense* `FLOAT32` / `FLOAT64` / `INT8` vectors. Sparse and
   `BINARY`-format vectors are not decoded.
+- **Geometries** are converted through WKT, so Oracle types WKT cannot express
+  (e.g. circular arcs) are not supported.
 - **Mapped to `VARCHAR`** (not a native type): `INTERVAL YEAR TO MONTH`, `XMLTYPE`,
-  `SDO_GEOMETRY` (spatial), `ROWID`/`UROWID`, and any unrecognized type.
+  `ROWID`/`UROWID`, and any unrecognized type.
 - **Identifier case:** Oracle objects created with quoted **lower/mixed-case**
   names are not addressable — names are matched case-insensitively against
   standard (upper-case) Oracle identifiers.
@@ -169,6 +173,27 @@ ATTACH '' AS ora (TYPE oracle, SECRET ora);
 A secret named `__default_oracle` is applied automatically to any Oracle `ATTACH`
 without a `SECRET`. Use `CREATE PERSISTENT SECRET …` to keep it across restarts.
 
+### Oracle Wallet / tnsnames.ora
+
+Point `config_dir` at a directory holding `tnsnames.ora`, `sqlnet.ora` and/or a
+wallet — it is applied as `TNS_ADMIN` for the connection (aliases: `tns_admin`,
+`wallet_path`):
+
+```sql
+-- TNS alias resolved from <dir>/tnsnames.ora
+ATTACH 'user/password@MYDB' AS ora (TYPE oracle, config_dir '/path/to/network/admin');
+
+-- Wallet holding the credentials (external authentication, no user/password)
+ATTACH '@MYDB_HIGH' AS ora (TYPE oracle, config_dir '/path/to/wallet');
+```
+
+It also works on a secret, so the whole connection lives in one place:
+
+```sql
+CREATE SECRET adb (TYPE oracle, connectString 'MYDB_HIGH', config_dir '/path/to/wallet');
+ATTACH '' AS ora (TYPE oracle, SECRET adb);
+```
+
 Or pass the connect string directly (Oracle EZConnect syntax):
 
 ```
@@ -286,8 +311,9 @@ FROM ora.app.items;
 | `BOOLEAN` (23ai) | `BOOLEAN` |
 | `JSON` (21c/23ai) | `JSON` |
 | `VECTOR` (23ai) | `LIST(FLOAT)` |
+| `SDO_GEOMETRY` (Spatial) | `GEOMETRY` (DuckDB 1.5+, with SRID as CRS); WKT `VARCHAR` on 1.4 LTS |
 | `INTERVAL DAY TO SECOND` | `INTERVAL` |
-| `INTERVAL YEAR TO MONTH`, `XMLTYPE`, spatial, `ROWID`, … | `VARCHAR` |
+| `INTERVAL YEAR TO MONTH`, `XMLTYPE`, `ROWID`, … | `VARCHAR` |
 
 ## Extension options
 

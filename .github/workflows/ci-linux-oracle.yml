@@ -29,7 +29,7 @@ jobs:
     # die DB existiert nur für die Dauer dieses Jobs und ist nicht erreichbar.
     services:
       oracle:
-        image: gvenzl/oracle-free:slim
+        image: gvenzl/oracle-free:latest
         env:
           ORACLE_PASSWORD: ci_syspw
           APP_USER: demo
@@ -128,6 +128,48 @@ jobs:
             echo "ATTACH '${ORA_DSN}' AS ora (TYPE oracle);"
             cat "${GITHUB_WORKSPACE}/test/sql/integration.sql"
           } | ./build/release/duckdb -unsigned
+
+      - name: Run spatial tests
+        working-directory: duckdb
+        env:
+          LD_LIBRARY_PATH: ${{ env.IC_DIR }}
+          ORA_DSN: demo/ci_demopw@127.0.0.1:1521/FREEPDB1
+        run: |
+          set -euo pipefail
+          EXT="$(pwd)/build/release/repository/${DUCKDB_VERSION}/linux_amd64/oracle.duckdb_extension"
+          {
+            echo "LOAD '${EXT}';"
+            echo "ATTACH '${ORA_DSN}' AS ora (TYPE oracle);"
+            cat "${GITHUB_WORKSPACE}/test/sql/integration_spatial.sql"
+          } | ./build/release/duckdb -unsigned
+
+      - name: Run wallet / TNS_ADMIN test
+        working-directory: duckdb
+        env:
+          LD_LIBRARY_PATH: ${{ env.IC_DIR }}
+        run: |
+          set -euo pipefail
+          EXT="$(pwd)/build/release/repository/${DUCKDB_VERSION}/linux_amd64/oracle.duckdb_extension"
+          TNSDIR="${RUNNER_TEMP}/tnsdir"
+          mkdir -p "$TNSDIR"
+          cat > "$TNSDIR/tnsnames.ora" <<'TNS'
+          LOCALTEST = (DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=127.0.0.1)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=FREEPDB1)))
+          TNS
+          # The alias only resolves when config_dir is honoured as TNS_ADMIN.
+          {
+            echo "LOAD '${EXT}';"
+            echo "ATTACH 'demo/ci_demopw@LOCALTEST' AS ora (TYPE oracle, config_dir '${TNSDIR}');"
+            echo "SELECT count(*) AS wallet_path_ok FROM ora.demo.t_emp;"
+          } | ./build/release/duckdb -unsigned
+          # Without config_dir the same alias must fail (proves the setting is what works).
+          if { echo ".bail on"
+               echo "LOAD '${EXT}';"
+               echo "ATTACH 'demo/ci_demopw@LOCALTEST' AS ora (TYPE oracle);"
+               echo "SELECT 1;"; } | ./build/release/duckdb -unsigned 2>/dev/null; then
+            echo "expected the TNS alias to fail without config_dir" >&2
+            exit 1
+          fi
+          echo "wallet/TNS_ADMIN behaviour verified"
 
       - name: Upload artifact
         if: always()

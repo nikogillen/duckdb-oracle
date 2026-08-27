@@ -71,6 +71,21 @@ public:
 				dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);
 				throw IOException("Oracle getQueryInfo failed: %s", string(error_info.message));
 			}
+			// Fetch NUMBER columns as text unless ODPI-C would use an exact int64.
+			// Its default for everything else is double, which cannot hold Oracle's
+			// up to 38 significant digits and silently loses precision — including
+			// for NUMBER(38,0), the typical surrogate key.
+			const auto &type_info = col_info[i].typeInfo;
+			bool exact_as_int64 = type_info.scale == 0 && type_info.precision > 0 &&
+			                      type_info.precision <= DPI_MAX_INT64_PRECISION;
+			if (type_info.oracleTypeNum == DPI_ORACLE_TYPE_NUMBER && !exact_as_int64) {
+				if (dpiStmt_defineValue(stmt, i + 1, DPI_ORACLE_TYPE_NUMBER,
+				                        DPI_NATIVE_TYPE_BYTES, 0, 0, nullptr) < 0) {
+					dpiContext_getError(OracleUtils::GetOrCreateContext(), &error_info);
+					throw IOException("Oracle defineValue failed: %s",
+					                  string(error_info.message));
+				}
+			}
 		}
 	}
 
@@ -248,6 +263,13 @@ static void OracleInitInternal(ClientContext &context, const OracleBindData &bin
 		}
 		if (column_id == COLUMN_IDENTIFIER_ROW_ID) {
 			col_names += "ROWID";
+		} else if (column_id < bind_data.oracle_types.size() &&
+		           bind_data.oracle_types[column_id].info ==
+		               OracleTypeAnnotation::SPATIAL_AS_GEOMETRY) {
+			// Let Oracle serialize SDO_GEOMETRY to WKT (returned as a CLOB); the
+			// converter turns that into GEOMETRY (1.5+) or leaves it as WKT text.
+			col_names += "SDO_UTIL.TO_WKTGEOMETRY(" +
+			             OracleUtils::QuoteIdentifier(sql_names[column_id]) + ")";
 		} else {
 			col_names += OracleUtils::QuoteIdentifier(sql_names[column_id]);
 		}

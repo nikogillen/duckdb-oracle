@@ -1,5 +1,6 @@
 #include "oracle_conversion.hpp"
 #include "oracle_utils.hpp"
+#include "oracle_duckdb_compat.hpp"
 
 #include "duckdb/common/types/date.hpp"
 #include "duckdb/common/types/time.hpp"
@@ -8,6 +9,9 @@
 #include "duckdb/common/types/vector.hpp"
 #include "duckdb/common/types/uuid.hpp"
 #include "duckdb/common/types/decimal.hpp"
+#if ORACLE_HAS_GEOMETRY_TYPE
+#include "duckdb/common/types/geometry.hpp"
+#endif
 
 #include <cstring>
 #include <cstdio>
@@ -74,6 +78,96 @@ static string OracleReadBlob(dpiLob *lob) {
 	}
 	result.resize(read_len);
 	return result;
+}
+
+// Parse an Oracle NUMBER string into the unscaled integer DuckDB stores for a
+// DECIMAL of the given scale, e.g. "12.345" with scale 2 -> 1235 (half-up).
+// Handles a leading sign, an optional exponent, and digit counts beyond what
+// double or int64 could hold. Returns false if the text is not a number.
+static bool OracleParseDecimal(const string &text, uint8_t scale, hugeint_t &result) {
+	idx_t pos = 0;
+	while (pos < text.size() && StringUtil::CharacterIsSpace(text[pos])) {
+		pos++;
+	}
+	bool negative = false;
+	if (pos < text.size() && (text[pos] == '+' || text[pos] == '-')) {
+		negative = text[pos] == '-';
+		pos++;
+	}
+
+	hugeint_t digits(0);
+	int64_t exponent = 0; // decimal places already consumed
+	bool any_digit = false;
+	bool seen_dot = false;
+	for (; pos < text.size(); pos++) {
+		char c = text[pos];
+		if (c == '.') {
+			if (seen_dot) {
+				return false;
+			}
+			seen_dot = true;
+			continue;
+		}
+		if (c == 'e' || c == 'E') {
+			break;
+		}
+		if (c < '0' || c > '9') {
+			return false;
+		}
+		any_digit = true;
+		digits = Hugeint::Add(Hugeint::Multiply(digits, hugeint_t(10)), hugeint_t(c - '0'));
+		if (seen_dot) {
+			exponent++;
+		}
+	}
+	if (!any_digit) {
+		return false;
+	}
+	if (pos < text.size() && (text[pos] == 'e' || text[pos] == 'E')) {
+		// Oracle may return scientific notation for very large/small magnitudes.
+		int64_t exp_value = 0;
+		bool exp_negative = false;
+		pos++;
+		if (pos < text.size() && (text[pos] == '+' || text[pos] == '-')) {
+			exp_negative = text[pos] == '-';
+			pos++;
+		}
+		bool exp_digit = false;
+		for (; pos < text.size(); pos++) {
+			if (text[pos] < '0' || text[pos] > '9') {
+				return false;
+			}
+			exp_digit = true;
+			exp_value = exp_value * 10 + (text[pos] - '0');
+			if (exp_value > 1000) { // far outside any DECIMAL range
+				return false;
+			}
+		}
+		if (!exp_digit) {
+			return false;
+		}
+		exponent -= exp_negative ? -exp_value : exp_value;
+	}
+
+	// Rescale to the target scale.
+	int64_t shift = (int64_t)scale - exponent;
+	if (shift > 0) {
+		for (int64_t i = 0; i < shift; i++) {
+			digits = Hugeint::Multiply(digits, hugeint_t(10));
+		}
+	} else if (shift < 0) {
+		// Drop excess decimals, rounding half away from zero on the last one.
+		for (int64_t i = 0; i < -shift - 1; i++) {
+			digits = Hugeint::Divide(digits, hugeint_t(10));
+		}
+		auto last = Hugeint::Modulo(digits, hugeint_t(10));
+		digits = Hugeint::Divide(digits, hugeint_t(10));
+		if (Hugeint::Cast<int64_t>(last) >= 5) {
+			digits = Hugeint::Add(digits, hugeint_t(1));
+		}
+	}
+	result = negative ? Hugeint::Negate(digits) : digits;
+	return true;
 }
 
 // Append a JSON-escaped string literal (with surrounding quotes) to out.
@@ -256,30 +350,36 @@ void OracleConvertValue(Vector &col, idx_t out_row,
 		break;
 	}
 	case LogicalTypeId::DECIMAL: {
-		// Oracle NUMBER comes back as DPI_NATIVE_TYPE_BYTES (string repr) by default
-		double dval = 0.0;
-		if (native_type == DPI_NATIVE_TYPE_BYTES) {
-			dval = atof(string(data->value.asBytes.ptr, data->value.asBytes.length).c_str());
-		} else if (native_type == DPI_NATIVE_TYPE_DOUBLE) {
-			dval = data->value.asDouble;
-		} else if (native_type == DPI_NATIVE_TYPE_INT64) {
-			dval = (double)data->value.asInt64;
-		}
+		// Oracle NUMBER comes back as DPI_NATIVE_TYPE_BYTES (string repr) by default.
+		// Parse the digits exactly instead of going through double: a DECIMAL(38,x)
+		// carries up to 38 digits, which neither double (~15-16 digits) nor the
+		// intermediate int64 can represent — that silently corrupted large values.
 		auto width = DecimalType::GetWidth(target_type);
 		auto scale = DecimalType::GetScale(target_type);
-		double multiplier = 1.0;
-		for (int i = 0; i < scale; i++) {
-			multiplier *= 10.0;
+
+		string text;
+		if (native_type == DPI_NATIVE_TYPE_BYTES) {
+			text = string(data->value.asBytes.ptr, data->value.asBytes.length);
+		} else if (native_type == DPI_NATIVE_TYPE_DOUBLE) {
+			text = StringUtil::Format("%.17g", data->value.asDouble);
+		} else if (native_type == DPI_NATIVE_TYPE_INT64) {
+			text = to_string(data->value.asInt64);
 		}
-		int64_t int_val = (int64_t)(dval * multiplier + (dval >= 0 ? 0.5 : -0.5));
+
+		hugeint_t unscaled(0);
+		bool parsed = OracleParseDecimal(text, scale, unscaled);
+		if (!parsed) {
+			FlatVector::SetNull(col, out_row, true);
+			break;
+		}
 		if (width <= Decimal::MAX_WIDTH_INT16) {
-			FlatVector::GetData<int16_t>(col)[out_row] = (int16_t)int_val;
+			FlatVector::GetData<int16_t>(col)[out_row] = (int16_t)Hugeint::Cast<int64_t>(unscaled);
 		} else if (width <= Decimal::MAX_WIDTH_INT32) {
-			FlatVector::GetData<int32_t>(col)[out_row] = (int32_t)int_val;
+			FlatVector::GetData<int32_t>(col)[out_row] = (int32_t)Hugeint::Cast<int64_t>(unscaled);
 		} else if (width <= Decimal::MAX_WIDTH_INT64) {
-			FlatVector::GetData<int64_t>(col)[out_row] = int_val;
+			FlatVector::GetData<int64_t>(col)[out_row] = Hugeint::Cast<int64_t>(unscaled);
 		} else {
-			FlatVector::GetData<hugeint_t>(col)[out_row] = Hugeint::Convert(int_val);
+			FlatVector::GetData<hugeint_t>(col)[out_row] = unscaled;
 		}
 		break;
 	}
@@ -327,6 +427,35 @@ void OracleConvertValue(Vector &col, idx_t out_row,
 		    StringVector::AddString(col, str_val);
 		break;
 	}
+#if ORACLE_HAS_GEOMETRY_TYPE
+	case LogicalTypeId::GEOMETRY: {
+		// SDO_GEOMETRY arrives as WKT text (the scan wraps the column in
+		// SDO_UTIL.TO_WKTGEOMETRY, which returns a CLOB).
+		string wkt;
+		if (native_type == DPI_NATIVE_TYPE_LOB) {
+			wkt = OracleReadClob(data->value.asLOB);
+		} else if (native_type == DPI_NATIVE_TYPE_BYTES) {
+			wkt = string(data->value.asBytes.ptr, data->value.asBytes.length);
+		}
+		if (wkt.empty()) {
+			FlatVector::SetNull(col, out_row, true);
+			break;
+		}
+		string_t geom;
+		try {
+			// FromString throws on invalid WKT (its bool return is always true), e.g.
+			// for Oracle geometries WKT cannot express such as circular arcs. Surface
+			// those as NULL instead of failing the whole scan.
+			Geometry::FromString(string_t(wkt.c_str(), (uint32_t)wkt.size()), geom, col,
+			                     false);
+		} catch (const std::exception &) {
+			FlatVector::SetNull(col, out_row, true);
+			break;
+		}
+		FlatVector::GetData<string_t>(col)[out_row] = geom;
+		break;
+	}
+#endif
 	case LogicalTypeId::LIST: {
 		// Oracle 23ai VECTOR → LIST(FLOAT).
 		if (native_type == DPI_NATIVE_TYPE_VECTOR) {
